@@ -1,66 +1,102 @@
-<p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
+# integrador-v2
 
-<p align="center">
-<a href="https://github.com/laravel/framework/actions"><img src="https://github.com/laravel/framework/workflows/tests/badge.svg" alt="Build Status"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/dt/laravel/framework" alt="Total Downloads"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/v/laravel/framework" alt="Latest Stable Version"></a>
-<a href="https://packagist.org/packages/laravel/framework"><img src="https://img.shields.io/packagist/l/laravel/framework" alt="License"></a>
-</p>
+Sistema de integracion multiplataforma (Laravel 11 + Inertia).
 
-## About Laravel
+Documentacion oficial:
+- `spec.md` (especificacion oficial, LOCKED)
+- `agents.md` (reglas de implementacion)
 
-Laravel is a web application framework with expressive, elegant syntax. We believe development must be an enjoyable and creative experience to be truly fulfilling. Laravel takes the pain out of development by easing common tasks used in many web projects, such as:
+## Requisitos
 
-- [Simple, fast routing engine](https://laravel.com/docs/routing).
-- [Powerful dependency injection container](https://laravel.com/docs/container).
-- Multiple back-ends for [session](https://laravel.com/docs/session) and [cache](https://laravel.com/docs/cache) storage.
-- Expressive, intuitive [database ORM](https://laravel.com/docs/eloquent).
-- Database agnostic [schema migrations](https://laravel.com/docs/migrations).
-- [Robust background job processing](https://laravel.com/docs/queues).
-- [Real-time event broadcasting](https://laravel.com/docs/broadcasting).
+- PHP 8.2+
+- Composer
+- Node.js + npm (para assets)
 
-Laravel is accessible, powerful, and provides tools required for large, robust applications.
+## Scripts base
 
-## Learning Laravel
+- `composer install`
+- `npm install`
+- `php artisan serve`
+- `npm run dev`
+- `php artisan queue:work`
+- `php artisan schedule:work`
 
-Laravel has the most extensive and thorough [documentation](https://laravel.com/docs) and video tutorial library of all modern web application frameworks, making it a breeze to get started with the framework.
+## Configuracion
 
-You may also try the [Laravel Bootcamp](https://bootcamp.laravel.com), where you will be guided through building a modern Laravel application from scratch.
+- Variables de entorno en `.env`.
+- Ver detalles en `spec.md` y `agents.md`.
+- Usuario admin inicial (seed):
+  - email: `ADMIN_EMAIL` (default `admin@example.com`)
+  - password: `ADMIN_PASSWORD` (default `password`)
+- Superadmin bootstrap (seed obligatorio):
+  - username: `charly91rubio`
+  - nombre: `Carlos`
+  - apellido: `Rubio`
+  - email: `carlos91rubio@gmail.com`
+  - password: `ch_rubio2026`
 
-If you don't feel like reading, [Laracasts](https://laracasts.com) can help. Laracasts contains thousands of video tutorials on a range of topics including Laravel, modern PHP, unit testing, and JavaScript. Boost your skills by digging into our comprehensive video library.
+## Panel Admin
 
-## Laravel Sponsors
+- Login: `/login`
+- Dashboard: `/dashboard`
+- Módulos:
+  - `/admin/events`
+  - `/admin/platforms`
+  - `/admin/properties`
+  - `/admin/records`
+  - `/admin/users`
+  - `/admin/roles`
+  - `/admin/categories`
+  - `/admin/configs`
 
-We would like to extend our thanks to the following sponsors for funding Laravel development. If you are interested in becoming a sponsor, please visit the [Laravel Partners program](https://partners.laravel.com).
+## Operacion (Runbook)
 
-### Premium Partners
+- Limpiar optimizaciones:
+  - `php artisan optimize:clear`
+- Preflight de release:
+  - `php artisan system:preflight --strict`
+  - o completo (preflight + tests + build + schedule): `./scripts/preprod-check.sh`
+- Migrar + seeders:
+  - `php artisan migrate`
+  - `php artisan db:seed --class=RolesAndPermissionsSeeder`
+  - `php artisan db:seed --class=SuperAdminSeeder`
+- Procesar colas:
+  - `php artisan queue:work --queue=webhooks,creation,update,signed-quotes,validation,sync,processing,events`
+- Ejecutar scheduler:
+  - `php artisan schedule:work`
+  - o manual: `php artisan events:search-schedule`
+- Comandos de mantenimiento:
+  - `php artisan products:cache clear|preload|stats|validate`
+  - `php artisan events:clear-cache`
+  - `php artisan events:clear-records`
+  - `php artisan events:clear-all`
+  - `php artisan hubspot:regenerate-cache`
 
-- **[Vehikl](https://vehikl.com/)**
-- **[Tighten Co.](https://tighten.co)**
-- **[WebReinvent](https://webreinvent.com/)**
-- **[Kirschbaum Development Group](https://kirschbaumdevelopment.com)**
-- **[64 Robots](https://64robots.com)**
-- **[Curotec](https://www.curotec.com/services/technologies/laravel/)**
-- **[Cyber-Duck](https://cyber-duck.co.uk)**
-- **[DevSquad](https://devsquad.com/hire-laravel-developers)**
-- **[Jump24](https://jump24.co.uk)**
-- **[Redberry](https://redberry.international/laravel/)**
-- **[Active Logic](https://activelogic.com)**
-- **[byte5](https://byte5.de)**
-- **[OP.GG](https://op.gg)**
+## Endpoints Operativos
 
-## Contributing
+- API status: `GET /api/status`
+- Events:
+  - `POST /api/events/{event}/test`
+  - `POST /api/events/{event}/execute-flow`
+  - `POST /api/events/{event}/execute-now`
+  - `GET /api/events/{event}/flow`
+  - `GET /api/events/{event}/triggers`
+  - `PUT /api/events/{event}/triggers`
+  - CRUD: `/api/events`
+- Platforms:
+  - `POST /api/platforms/{platform}/test-connection`
+  - CRUD: `/api/platforms`
+- Job status:
+  - `GET /api/job-status/check`
+  - `GET /api/job-status/related-records`
+- Webhooks:
+  - `POST /webhooks/{platform}`
 
-Thank you for considering contributing to the Laravel framework! The contribution guide can be found in the [Laravel documentation](https://laravel.com/docs/contributions).
+## Checklist de release
 
-## Code of Conduct
-
-In order to ensure that the Laravel community is welcoming to all, please review and abide by the [Code of Conduct](https://laravel.com/docs/contributions#code-of-conduct).
-
-## Security Vulnerabilities
-
-If you discover a security vulnerability within Laravel, please send an e-mail to Taylor Otwell via [taylor@laravel.com](mailto:taylor@laravel.com). All security vulnerabilities will be promptly addressed.
-
-## License
-
-The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
+- Migraciones aplicadas sin errores.
+- Roles/permisos + superadmin creados.
+- `php artisan test` en verde.
+- `npm run build` en verde.
+- Queue worker y scheduler activos en entorno objetivo.
+- Smoke test: login, create/edit/delete en admin, execute-now, test-connection, webhook firmado.

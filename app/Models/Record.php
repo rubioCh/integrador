@@ -40,4 +40,9 @@ class Record extends Model
     {
         return $this->hasMany(self::class, 'record_id');
     }
+
+    public function idempotencyKeys(): HasMany
+    {
+        return $this->hasMany(EventIdempotencyKey::class);
+    }
 }

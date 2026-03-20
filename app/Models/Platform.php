@@ -14,6 +14,8 @@ class Platform extends Model
         'name',
         'slug',
         'type',
+        'signature',
+        'secret_key',
         'credentials',
         'settings',
         'active',
@@ -27,6 +29,7 @@ class Platform extends Model
 
     protected $hidden = [
         'credentials',
+        'secret_key',
     ];
 
     public function events(): HasMany

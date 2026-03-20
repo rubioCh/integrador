@@ -27,4 +27,11 @@ class Role extends Model
         return $this->belongsToMany(Permission::class, 'permission_role')
             ->withTimestamps();
     }
+
+    public function hasPermission(string $slug): bool
+    {
+        return $this->permissions()
+            ->where('slug', $slug)
+            ->exists();
+    }
 }

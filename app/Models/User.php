@@ -19,6 +19,9 @@ class User extends Authenticatable
      * @var list<string>
      */
     protected $fillable = [
+        'username',
+        'first_name',
+        'last_name',
         'name',
         'email',
         'password',
@@ -51,5 +54,25 @@ class User extends Authenticatable
     {
         return $this->belongsToMany(Role::class, 'role_user')
             ->withTimestamps();
+    }
+
+    public function hasRole(string $slug): bool
+    {
+        return $this->roles()
+            ->where('slug', $slug)
+            ->exists();
+    }
+
+    public function hasPermission(string $permission): bool
+    {
+        if ($this->hasRole('superadmin')) {
+            return true;
+        }
+
+        return $this->roles()
+            ->whereHas('permissions', function ($query) use ($permission): void {
+                $query->where('slug', $permission);
+            })
+            ->exists();
     }
 }

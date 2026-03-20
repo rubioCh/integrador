@@ -68,4 +68,27 @@ class EventLoggingServiceTest extends TestCase
             'message' => 'Boom',
         ]);
     }
+
+    public function test_it_logs_warning_status_with_details(): void
+    {
+        $service = app(EventLoggingService::class);
+
+        $record = $service->createEventRecord(
+            eventType: 'object.updated',
+            status: 'processing',
+            payload: [],
+            message: 'Processing',
+        );
+
+        $service->logEventWarning($record, 'Event method not available for execution.', [
+            'reason' => 'method_not_available',
+            'method_name' => null,
+        ]);
+
+        $record->refresh();
+
+        $this->assertSame('warning', $record->status);
+        $this->assertSame('Event method not available for execution.', $record->message);
+        $this->assertSame('method_not_available', $record->details['reason'] ?? null);
+    }
 }

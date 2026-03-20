@@ -56,6 +56,18 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Required Environment Validation
+    |--------------------------------------------------------------------------
+    |
+    | When enabled, the app will fail fast during bootstrap if required
+    | integration and database environment variables are missing.
+    |
+    */
+
+    'validate_required_env' => (bool) env('APP_VALIDATE_REQUIRED_ENV', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Application Timezone
     |--------------------------------------------------------------------------
     |

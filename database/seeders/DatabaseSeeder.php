@@ -2,8 +2,10 @@
 
 namespace Database\Seeders;
 
+use App\Models\Role;
 use App\Models\User;
 // use Illuminate\Database\Console\Seeds\WithoutModelEvents;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Database\Seeder;
 
 class DatabaseSeeder extends Seeder
@@ -13,11 +15,33 @@ class DatabaseSeeder extends Seeder
      */
     public function run(): void
     {
-        // User::factory(10)->create();
+        $this->call(RolesAndPermissionsSeeder::class);
+        $this->call(SuperAdminSeeder::class);
 
-        User::factory()->create([
+        $admin = User::query()->firstOrCreate(
+            ['email' => env('ADMIN_EMAIL', 'admin@example.com')],
+            [
+                'username' => 'admin',
+                'first_name' => 'Admin',
+                'last_name' => 'User',
+                'name' => 'Admin User',
+                'password' => Hash::make(env('ADMIN_PASSWORD', 'password')),
+            ]
+        );
+
+        $adminRole = Role::query()->where('slug', 'admin')->first();
+        if ($adminRole) {
+            $admin->roles()->syncWithoutDetaching([$adminRole->id]);
+        }
+
+        User::query()->firstOrCreate([
             'name' => 'Test User',
             'email' => 'test@example.com',
+        ], [
+            'username' => 'testuser',
+            'first_name' => 'Test',
+            'last_name' => 'User',
+            'password' => Hash::make('password'),
         ]);
     }
 }

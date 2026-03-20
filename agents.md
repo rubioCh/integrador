@@ -1,3 +1,12 @@
+# agents.md
+
+Proyecto: INTEGRADOR - Sistema de Integracion Multiplataforma (Laravel 11 + Inertia)
+Basado en: spec.md v1.1.1
+Version: 1.2
+Estado: ACTIVE
+
+---
+
 # INTEGRADOR - Sistema de Integración Multiplataforma (Laravel 11 + Inertia)
 
 ## 1) Propósito
@@ -18,6 +27,9 @@ Construir un sistema de integración multiplataforma que sincronice datos entre 
 5. Mantener trazabilidad completa mediante el sistema de Records.
 6. Evitar hardcodear credenciales y exigir variables de entorno.
 7. Convertir eventos síncronos que puedan ser asíncronos en Jobs cuando sea apropiado.
+8. Alinear implementación con `spec.md` (incluye funcionalidades heredadas del proyecto base).
+9. Respetar jerarquia de roles `superadmin > admin > operator`.
+10. Mantener y ejecutar seeder obligatorio de superadmin bootstrap.
 
 ### 2.4 Límites
 1. No inventar endpoints, credenciales o comportamientos no descritos.
@@ -59,6 +71,31 @@ Si falta información, detente y pide aclaración. Convierte eventos que puedan 
 - No inventar endpoints externos, credenciales, o funcionalidades no descritas.
 - No hardcodear tokens o secretos en código.
 - No procesar eventos síncronamente cuando puedan ser Jobs.
+
+---
+
+## 4.1 Funcionalidades heredadas obligatorias (spec.md §9)
+- Webhooks con firma por plataforma (Spatie Webhook Client).
+- Procesamiento de webhooks con múltiples payloads.
+- Eventos programados (`schedule_expression`) y comando `events:search-schedule`.
+- Testing de eventos y ejecución de flujos completos desde el evento raíz.
+- Triggers condicionales por grupo y operadores.
+- Pipeline de cotizaciones firmadas con jobs encadenados.
+- Validación inteligente de entidades (create/update/no_change).
+- Caché de productos y comandos artisan de mantenimiento.
+- Endpoints operativos (job status, test connection).
+- Manejo de errores Guzzle sin truncate.
+- Soporte de propiedades tipo archivo (descarga desde HubSpot).
+- Admin UI protegido con roles/permisos.
+- Seeder bootstrap de `superadmin` obligatorio.
+
+---
+
+## Formato de Control de Progreso
+
+Usar el siguiente formato en reportes y checklist:
+
+Formato: <Item> -- STATUS: PENDING | IN_PROGRESS | VERIFIED | BLOCKED
 
 ## 5) Convenciones de nombres (OBLIGATORIO)
 Domain
@@ -107,6 +144,20 @@ Jobs
 - HubSpot/HubSpotAddNoteJob
 - Odoo/OdooGetListPricesJob
 - EndpointExecutionJob
+- ProcessSignedQuotesJob
+- ValidateEntitiesJob
+- CreateOrUpdateEntityJob
+- UpdateHubSpotJob
+- CreateQuoteJob
+- ProcessNextEventJob
+
+Console Commands
+- SearchEventSchedule (signature `events:search-schedule`)
+- EventsClearCacheCommand (signature `events:clear-cache`)
+- EventsClearRecordsCommand (signature `events:clear-records`)
+- EventsClearAllCommand (signature `events:clear-all`)
+- HubspotRegenerateCacheCommand (signature `hubspot:regenerate-cache`)
+- ProductsCacheCommand (signature `products:cache`)
 
 Generic Integrations (Sin SDK)
 - GenericPlatformPort
@@ -119,6 +170,11 @@ Controllers
 - PropertyController
 - WebhookController
 - DashboardController
+- JobStatusController
+- ConfigController
+- CategoryController
+- RoleController
+- UserController
 
 Models
 - Event, Record, Platform, Property, PropertyRelationship
@@ -231,10 +287,18 @@ Models
 - `app/Jobs/HubSpot/HubSpotAddNoteJob.php`: Job para agregar notas en HubSpot.
 - `app/Jobs/Odoo/OdooGetListPricesJob.php`: Job para obtener listas de precios de Odoo.
 - `app/Jobs/Generic/EndpointExecutionJob.php`: Job para ejecución HTTP asíncrona en plataformas sin SDK.
+- `app/Jobs/ProcessSignedQuotesJob.php`: Orquestador de cotizaciones firmadas.
+- `app/Jobs/ValidateEntitiesJob.php`: Valida entidades en plataforma destino.
+- `app/Jobs/CreateOrUpdateEntityJob.php`: Crea/actualiza entidades destino.
+- `app/Jobs/UpdateHubSpotJob.php`: Sincroniza IDs/metadatos en HubSpot.
+- `app/Jobs/CreateQuoteJob.php`: Crea cotizacion en plataforma destino.
+- `app/Jobs/ProcessNextEventJob.php`: Encadena eventos siguientes.
 - `app/Http/Controllers/WebhookController.php`: Controlador para recibir webhooks.
 - `app/Http/Controllers/EventController.php`: Controlador para gestión de eventos.
 - `app/Http/Controllers/PlatformController.php`: Controlador para gestión de plataformas.
 - `app/Http/Controllers/PropertyController.php`: Controlador para gestión de propiedades.
+- `app/Http/Controllers/JobStatusController.php`: Controlador para estado de jobs/records.
+- `app/Http/Controllers/ConfigController.php`: Controlador para configuraciones (logo/token).
 - `app/WebhookClient/WebhookCustomSignatureValidator.php`: Validador de firmas de webhooks.
 - `app/WebhookClient/WebhookCustomProfile.php`: Perfil personalizado de webhooks.
 - `app/WebhookClient/WebhookCustomResponse.php`: Respuesta personalizada de webhooks.
@@ -246,6 +310,10 @@ Models
 - `config/queue.php`: Configuración de colas.
 - `config/queue-custom.php`: Configuración personalizada de colas.
 - `config/generic-platforms.php`: Configuración base de auth, dominios permitidos, headers sensibles y políticas de retry/timeout para plataformas sin SDK.
+- `config/webhook-client.php`: Configuración de Spatie Webhook Client.
+- `app/Services/CustomBodySummarizer.php`: Evita truncado en errores Guzzle.
+- `app/Services/LargeBodySummarizer.php`: Alternativa de truncado extendido.
+- `app/Helpers/GuzzleHelper.php`: Helper para mensajes completos de errores.
 
 ## 7.1) Criterios de aceptación por archivo (OBLIGATORIO)
 - `app/Models/Event.php`: Expone relaciones, métodos de negocio y validaciones; no contiene lógica de infraestructura.
@@ -253,6 +321,8 @@ Models
 - `app/Models/Platform.php`: Oculta credenciales sensibles; no contiene lógica de API.
 - `app/Models/Property.php`: Soporta relaciones con eventos y propiedades relacionadas; no contiene transformaciones.
 - `app/Enums/EventType.php`: Define todos los tipos de eventos con métodos helper; no contiene lógica de negocio.
+- `app/Enums/EventType.php`: Actúa como registro canónico de tipos soportados para UI y dispatch (`label`, `description`, `group`, `eventClass`, opciones agrupadas), sin cambiar los `event_type_id` persistidos existentes.
+- `app/Enums/EventType.php`: En HubSpot, los cambios de propiedad deben definirse por `subscriptionType` real (`contact.propertyChange`, `company.propertyChange`, `deal.propertyChange`, `object.propertyChange`). `hubspot.property.changed` solo se tolera como compatibilidad legacy y no debe ofrecerse como opción principal en UI.
 - `app/Services/EventProcessingService.php`: Procesa eventos desde webhooks y delega a servicios; maneja errores esperados.
 - `app/Services/EventFlowService.php`: Ejecuta flujos completos de eventos encadenados; transforma datos entre eventos.
 - `app/Services/EventLoggingService.php`: Crea y actualiza Records con estados apropiados; no contiene lógica de negocio.
@@ -268,6 +338,12 @@ Models
 - `app/Jobs/Generic/EndpointExecutionJob.php`: Ejecuta HTTP asíncrono con timeout/retries, guarda trazabilidad y sanitiza logs.
 - `app/Http/Controllers/WebhookController.php`: Valida webhooks y delega a Jobs; no procesa síncronamente.
 - `app/Http/Controllers/EventController.php`: Expone API REST para gestión; valida permisos y datos.
+- Regla de compatibilidad: el admin debe sugerir tipos desde `EventType`, pero debe seguir tolerando valores manuales/legado en `event_type_id` cuando ya existan en datos heredados.
+- UX de eventos: cuando `event_type_id = generic.external.call`, el bloque de configuración HTTP genérica debe habilitarse y poder abrirse desde el botón `Show config`; los campos `payload_mapping` y `meta` deben mostrar placeholders orientativos, no solo llaves vacías.
+- UX de formularios admin: todos los campos deben exponer `label` visible; para JSON opcionales vacíos (`payload_mapping`, `meta` y similares) se debe preferir ayuda textual de formato antes que dejar contenido por defecto como `{}` o `[]`.
+- UX de mapeo: la administración de `property_relationships` debe existir en una pantalla dedicada por evento, separando claramente propiedades origen y destino, con edición explícita de `mapping_key`, estado activo y `meta`.
+- Observabilidad de cola: cuando un Job marque `warning`, el `Record.details` debe incluir causa técnica (`reason`, `service_class`, `method_name`, etc.) en lugar de quedar vacío.
+- Notas de fallo en HubSpot: en fallos de sincronización de contacto sobre flujos HubSpot (create/update), el sistema debe intentar registrar una nota en el contacto de HubSpot y guardar el resultado de ese intento en `Record.details.hubspot_note`.
 
 ## 8) Contratos clave (Interfaces)
 ### 8.1 EventProcessingService
@@ -1068,6 +1144,19 @@ Notas Fase 0:
 - Vista de trazabilidad debe mostrar:
   - `event_id`, `record_id`, `request_id`, `status_code`, `latency_ms`, `attempt`.
 - UI no debe mostrar secretos sin enmascarar.
+- Formulario de plataformas (`/admin/platforms/create` y `/admin/platforms/{id}/edit`) debe usar estructura por bloques:
+  - `Basic Information`
+  - bloque de configuración específica según `platform.type` (`HubSpot Configuration`, `Odoo Configuration`, `NetSuite Configuration`, `Generic Configuration`)
+  - `Security & API Settings`
+- En `Generic Configuration`, al cambiar `Auth Mode`, la UI debe mostrar solo los campos del modo seleccionado:
+  - `bearer_api_key` -> `api_key`
+  - `basic_auth` -> `username`, `password`
+  - `oauth2_client_credentials` -> `client_id`, `client_secret`, `token_url`
+- El formulario de plataformas NO debe exponer `credentials`/`settings` como JSON crudo en textarea para operación normal.
+  Debe mapear campos específicos a:
+  - `credentials` (secretos y claves),
+  - `settings` (URLs, timeouts y configuración no secreta).
+- Debe existir acción `Test connection` visible en cabecera del formulario de plataformas (habilitada en modo edición).
 
 #### RBAC mínimo para frontend/API (OBLIGATORIO)
 - `admin`:
@@ -1117,6 +1206,21 @@ Notas Fase 0:
 - `permissions`: Permisos
 - `categories`: Categorías de propiedades
 - `configs`: Configuración del sistema
+
+### 18.1.1 Jerarquia de roles y bootstrap (OBLIGATORIO)
+- Jerarquia canonica:
+  - `superadmin`: bypass total de permisos.
+  - `admin`: acceso alto pero sujeto a permisos asignados.
+  - `operator` u otros: acceso segun permisos asignados.
+- Seeder obligatorio: `database/seeders/SuperAdminSeeder.php`.
+- Datos obligatorios de bootstrap:
+  - `username`: `charly91rubio`
+  - `first_name`: `Carlos`
+  - `last_name`: `Rubio`
+  - `email`: `carlos91rubio@gmail.com`
+  - `password`: `ch_rubio2026` (guardar hasheada).
+- El seeder debe asociar el usuario al rol `superadmin`.
+- `DatabaseSeeder` debe invocar `RolesAndPermissionsSeeder` y luego `SuperAdminSeeder`.
 
 ### 18.2 Relaciones Clave
 - Event `belongsTo` Platform, Event (to_event)

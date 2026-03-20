@@ -58,6 +58,15 @@ class EventLoggingService
         ]);
     }
 
+    public function logEventWarning(Record $record, string $message, array $details = []): void
+    {
+        $record->update([
+            'status' => 'warning',
+            'message' => $message,
+            'details' => empty($details) ? null : $details,
+        ]);
+    }
+
     private function assertStatusIsCanonical(string $status): void
     {
         if (! in_array($status, self::ALLOWED_STATUSES, true)) {
