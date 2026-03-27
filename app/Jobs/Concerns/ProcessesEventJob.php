@@ -78,6 +78,10 @@ trait ProcessesEventJob
         if (! Arr::get($result, 'success', false)) {
             $message = Arr::get($result, 'message', 'Event processing failed.');
             $noteResult = $this->maybeAddHubspotFailureNote($event, $record, $data, $message);
+            $this->mergeRecordDetails($record, [
+                'service_output' => Arr::get($result, 'data', []),
+                'service_message' => Arr::get($result, 'message'),
+            ]);
             $eventLoggingService->logEventError($record, new \Exception($message));
             if (($noteResult['attempted'] ?? false) === true) {
                 $this->mergeRecordDetails($record, [

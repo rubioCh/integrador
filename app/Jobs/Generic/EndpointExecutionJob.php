@@ -8,6 +8,7 @@ use App\Models\Record;
 use App\Services\EventLoggingService;
 use App\Services\Generic\GenericHttpAdapter;
 use App\Services\Generic\GenericPlatformService;
+use App\Services\Hubspot\HubspotApiServiceRefactored;
 use App\Services\RateLimitService;
 use App\Jobs\ProcessNextEventJob;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -16,6 +17,7 @@ use Illuminate\Bus\Queueable;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Arr;
 use Illuminate\Support\Str;
 
 class EndpointExecutionJob implements ShouldQueue
@@ -38,8 +40,11 @@ class EndpointExecutionJob implements ShouldQueue
         GenericPlatformService $genericPlatformService,
         GenericHttpAdapter $httpAdapter,
         EventLoggingService $eventLoggingService,
-        RateLimitService $rateLimitService
+        RateLimitService $rateLimitService,
+        ?HubspotApiServiceRefactored $hubspotApiService = null
     ): void {
+        $hubspotApiService ??= app(HubspotApiServiceRefactored::class);
+
         $this->record->update([
             'status' => 'processing',
             'message' => 'Executing generic endpoint',
@@ -85,18 +90,27 @@ class EndpointExecutionJob implements ShouldQueue
         }
 
         $recordStatus = $response['success'] ? 'success' : ($response['retryable'] ? 'warning' : 'error');
+        $details = [
+            'response' => $this->sanitizeResponse($response),
+            'request' => [
+                'endpoint' => $endpoint,
+                'method' => $method,
+                'headers' => $this->sanitizeHeaders($headers),
+                'query' => $query,
+            ],
+        ];
+
+        if (! $response['success']) {
+            $details['hubspot_note'] = $this->maybeAddHubspotFailureNote(
+                $response,
+                $hubspotApiService
+            );
+        }
+
         $this->record->update([
             'status' => $recordStatus,
             'message' => $response['success'] ? 'Endpoint execution completed' : ($response['error']['message'] ?? 'Endpoint execution failed'),
-            'details' => [
-                'response' => $this->sanitizeResponse($response),
-                'request' => [
-                    'endpoint' => $endpoint,
-                    'method' => $method,
-                    'headers' => $this->sanitizeHeaders($headers),
-                    'query' => $query,
-                ],
-            ],
+            'details' => $details,
         ]);
 
         $idempotencyStatus = $response['success']
@@ -110,8 +124,64 @@ class EndpointExecutionJob implements ShouldQueue
         ]);
 
         if ($response['success'] && $this->event->to_event) {
-            ProcessNextEventJob::dispatch($this->event, $this->record, $this->payload)->onQueue('events');
+            ProcessNextEventJob::dispatch(
+                $this->event,
+                $this->record,
+                $this->buildNextEventPayload($response, $endpoint, $method)
+            )->onQueue('events');
         }
+    }
+
+    private function buildNextEventPayload(array $response, string $endpoint, string $method): array
+    {
+        $sourceEventId = Arr::get($this->payload, 'source_event_id')
+            ?? Arr::get($this->payload, '_event_metadata.event_id')
+            ?? $this->event->id;
+
+        $responseData = Arr::get($response, 'data', []);
+        if (! is_array($responseData)) {
+            $responseData = ['raw' => $responseData];
+        }
+
+        return array_replace_recursive($responseData, $this->extractNextEventContext($sourceEventId), [
+            'source_event_id' => $sourceEventId,
+            'destination_response' => $this->sanitizeResponse($response),
+            'destination_execution' => [
+                'source_event_id' => $sourceEventId,
+                'destination_event_id' => $this->event->id,
+                'destination_platform_type' => $this->event->platform?->type,
+                'endpoint' => $endpoint,
+                'method' => $method,
+                'processed_at' => now()->toISOString(),
+            ],
+        ]);
+    }
+
+    private function extractNextEventContext(int|string $sourceEventId): array
+    {
+        $context = [
+            'source_event_id' => $sourceEventId,
+        ];
+
+        foreach ([
+            'hubspot_object_id',
+            'hubspot_object_type',
+            'hubspotObjectId',
+            'hs_object_id',
+            'objectId',
+            'id',
+            'portalId',
+            'subscriptionType',
+            'propertyName',
+            'propertyValue',
+        ] as $key) {
+            $value = Arr::get($this->payload, $key);
+            if ($value !== null) {
+                $context[$key] = $value;
+            }
+        }
+
+        return $context;
     }
 
     private function sanitizeHeaders(array $headers): array
@@ -150,6 +220,117 @@ class EndpointExecutionJob implements ShouldQueue
         }
 
         return $details;
+    }
+
+    private function maybeAddHubspotFailureNote(array $response, HubspotApiServiceRefactored $hubspotApiService): array
+    {
+        $sourceEventId = Arr::get($this->payload, 'source_event_id')
+            ?? Arr::get($this->payload, '_event_metadata.event_id');
+
+        $sourceEvent = is_numeric($sourceEventId)
+            ? Event::query()->with('platform')->find((int) $sourceEventId)
+            : null;
+
+        if (($sourceEvent?->platform?->type ?? null) !== 'hubspot') {
+            return [
+                'attempted' => false,
+                'reason' => 'source_platform_not_hubspot',
+            ];
+        }
+
+        $contactId = $this->resolveHubspotContactId();
+        if ($contactId === null) {
+            return [
+                'attempted' => false,
+                'reason' => 'hubspot_contact_id_missing',
+            ];
+        }
+
+        $this->applyHubspotRuntimeConfig($sourceEvent);
+
+        $noteResponse = $hubspotApiService->addNoteToObject(
+            'contacts',
+            $contactId,
+            $this->buildOperationalFailureNote($response),
+            [
+                'event_id' => $this->event->id,
+                'record_id' => $this->record->id,
+                'source_event_id' => $sourceEvent?->id,
+                'status_code' => $response['status_code'] ?? null,
+            ]
+        );
+
+        return [
+            'attempted' => true,
+            'success' => (bool) ($noteResponse['success'] ?? false),
+            'contact_id' => $contactId,
+            'status_code' => $noteResponse['status_code'] ?? null,
+            'note_id' => Arr::get($noteResponse, 'data.id'),
+            'error' => $noteResponse['error'] ?? null,
+        ];
+    }
+
+    private function resolveHubspotContactId(): ?string
+    {
+        foreach ([
+            Arr::get($this->payload, 'hubspot_object_id'),
+            Arr::get($this->payload, 'hubspot_contact_id'),
+            Arr::get($this->payload, 'hubspotObjectId'),
+            Arr::get($this->payload, 'hs_object_id'),
+            Arr::get($this->payload, 'objectId'),
+            Arr::get($this->payload, 'id'),
+        ] as $candidate) {
+            if (! is_scalar($candidate)) {
+                continue;
+            }
+
+            $value = trim((string) $candidate);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    private function applyHubspotRuntimeConfig(Event $sourceEvent): void
+    {
+        $credentials = $sourceEvent->platform?->credentials ?? [];
+        $settings = $sourceEvent->platform?->settings ?? [];
+        $overrides = [];
+
+        $token = $credentials['access_token'] ?? $credentials['api_token'] ?? null;
+        if (is_string($token) && trim($token) !== '') {
+            $overrides['hubspot.access_token'] = $token;
+        }
+
+        $baseUrl = $settings['base_url'] ?? null;
+        if (is_string($baseUrl) && trim($baseUrl) !== '') {
+            $overrides['hubspot.base_url'] = $baseUrl;
+        }
+
+        if (! empty($overrides)) {
+            config($overrides);
+        }
+    }
+
+    private function buildOperationalFailureNote(array $response): string
+    {
+        $field = Arr::get($response, 'data.field');
+        $message = Arr::get($response, 'data.error')
+            ?? Arr::get($response, 'error.message')
+            ?? 'Fallo la sincronizacion del contacto en la plataforma destino.';
+
+        return trim(implode("\n", array_filter([
+            '[Integrador] Error de sincronizacion de contacto',
+            'Operacion: envio a plataforma destino',
+            'Evento: ' . ($this->event->name ?: $this->event->event_type_id),
+            'Motivo: ' . trim((string) $message),
+            is_scalar($field) && trim((string) $field) !== '' ? 'Propiedad: ' . trim((string) $field) : null,
+            isset($response['status_code']) ? 'Codigo HTTP: ' . $response['status_code'] : null,
+            'Record: #' . $this->record->id,
+            'Fecha: ' . now()->toISOString(),
+        ])));
     }
 
     private function acquireIdempotencyKey(

@@ -2,7 +2,7 @@
 
 Proyecto: INTEGRADOR - Sistema de Integracion Multiplataforma (Laravel 11 + Inertia)
 Basado en: spec.md v1.1.1
-Version: 1.2
+Version: 1.3
 Estado: ACTIVE
 
 ---
@@ -30,6 +30,7 @@ Construir un sistema de integración multiplataforma que sincronice datos entre 
 8. Alinear implementación con `spec.md` (incluye funcionalidades heredadas del proyecto base).
 9. Respetar jerarquia de roles `superadmin > admin > operator`.
 10. Mantener y ejecutar seeder obligatorio de superadmin bootstrap.
+11. En errores de sincronización de contactos relacionados con HubSpot, intentar registrar una nota visible en el objeto HubSpot afectado y guardar el resultado en `Record.details.hubspot_note`.
 
 ### 2.4 Límites
 1. No inventar endpoints, credenciales o comportamientos no descritos.
@@ -37,6 +38,7 @@ Construir un sistema de integración multiplataforma que sincronice datos entre 
 3. No modificar alcances sin aprobación del usuario.
 4. Detenerse si faltan datos necesarios y pedirlos.
 5. No procesar eventos síncronamente cuando puedan ser Jobs asíncronos.
+6. No usar el id técnico de HubSpot como propiedad mapeada editable; debe viajar como contexto técnico del flujo.
 
 ### 2.5 Herramientas permitidas
 1. Laravel 11 Framework.
@@ -52,6 +54,8 @@ Construir un sistema de integración multiplataforma que sincronice datos entre 
 Eres un desarrollador senior con experiencia en Laravel 11 e Inertia.js. Debes implementar el proyecto siguiendo estrictamente `agents.md`. No inventes endpoints, credenciales ni modelos. Usa arquitectura hexagonal con Services `*Service`, Events `*Event`, Listeners `*Listener` y Jobs `*Job`. 
 
 **REGLA CRÍTICA**: Los Listeners SOLO deben disparar Jobs usando `Job::dispatch()`. NO deben llamar a `helpers()->forwarding()` ni hacer procesamiento pesado. Todo el procesamiento debe estar en Jobs.
+
+**REGLA DE CONTEXTO HUBSPOT**: `hubspot_object_id` y equivalentes se usan solo para identificar el objeto a actualizar. Las propiedades a escribir deben salir exclusivamente del mapping configurado o de `destination_response.data`, nunca del contexto técnico.
 
 Si falta información, detente y pide aclaración. Convierte eventos que puedan ser asíncronos en Jobs.
 
@@ -88,6 +92,7 @@ Si falta información, detente y pide aclaración. Convierte eventos que puedan 
 - Soporte de propiedades tipo archivo (descarga desde HubSpot).
 - Admin UI protegido con roles/permisos.
 - Seeder bootstrap de `superadmin` obligatorio.
+- Notas operativas de fallo en contactos HubSpot con resultado almacenado en `Record.details.hubspot_note`.
 
 ---
 
@@ -344,6 +349,9 @@ Models
 - UX de mapeo: la administración de `property_relationships` debe existir en una pantalla dedicada por evento, separando claramente propiedades origen y destino, con edición explícita de `mapping_key`, estado activo y `meta`.
 - Observabilidad de cola: cuando un Job marque `warning`, el `Record.details` debe incluir causa técnica (`reason`, `service_class`, `method_name`, etc.) en lugar de quedar vacío.
 - Notas de fallo en HubSpot: en fallos de sincronización de contacto sobre flujos HubSpot (create/update), el sistema debe intentar registrar una nota en el contacto de HubSpot y guardar el resultado de ese intento en `Record.details.hubspot_note`.
+- Notas de fallo en HubSpot: en fallos de sincronización de contacto sobre flujos HubSpot (create/update/write-back/generic.external.call), el sistema debe intentar registrar una nota en el contacto de HubSpot y guardar el resultado de ese intento en `Record.details.hubspot_note`.
+- Contexto técnico HubSpot: `hubspot_object_id` y equivalentes deben resolverse como contexto del flujo; NO deben depender de `property_relationships` ni escribirse como propiedad editable.
+- Write-back de respuesta: cuando un flujo genérico exitoso encadene de regreso a HubSpot, el siguiente evento debe tomar como base `destination_response.data` más contexto técnico mínimo (`hubspot_object_id`, `source_event_id`, etc.), evitando reutilizar el payload completo del evento anterior.
 
 ## 8) Contratos clave (Interfaces)
 ### 8.1 EventProcessingService

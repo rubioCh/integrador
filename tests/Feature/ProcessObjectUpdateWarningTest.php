@@ -54,6 +54,8 @@ class ProcessObjectUpdateWarningTest extends TestCase
             'https://api.hubapi.test/crm/v3/objects/notes' => Http::response([
                 'id' => '1001',
             ], 201),
+            'https://api.hubapi.test/crm/v3/objects/notes/1001/associations/contact/445566/202' => Http::response([], 204),
+            'https://api.hubapi.test/crm/v3/objects/contact/445566/associations/notes/1001/201' => Http::response([], 204),
         ]);
 
         $job = new ProcessObjectUpdateJob($event, $record, [

@@ -92,12 +92,14 @@ class HubspotApiServiceRefactored
     {
         $normalizedType = $this->normalizeObjectType($objectType);
         $associationType = $this->resolveNoteAssociationType($normalizedType);
+        $associationObjectType = $this->resolveAssociationObjectType($normalizedType);
+        $recordToNoteAssociationType = $this->resolveRecordToNoteAssociationType($normalizedType);
 
         if ($objectId === '') {
             return $this->errorResponse(0, 'HubSpot object id is required to create note.');
         }
 
-        if (! $associationType) {
+        if (! $associationType || ! $associationObjectType || ! $recordToNoteAssociationType) {
             return $this->errorResponse(0, 'HubSpot association type is not configured for note creation.', [
                 'object_type' => $normalizedType,
             ]);
@@ -115,7 +117,7 @@ class HubspotApiServiceRefactored
             empty($contextLines) ? null : 'Context: ' . implode(' | ', $contextLines),
         ])));
 
-        return $this->request('POST', '/crm/v3/objects/notes', [
+        $createResponse = $this->request('POST', '/crm/v3/objects/notes', [
             'properties' => [
                 'hs_timestamp' => now()->toISOString(),
                 'hs_note_body' => $noteBody,
@@ -130,6 +132,76 @@ class HubspotApiServiceRefactored
                 ]],
             ]],
         ]);
+
+        if (! ($createResponse['success'] ?? false)) {
+            return $createResponse;
+        }
+
+        $noteId = (string) Arr::get($createResponse, 'data.id', '');
+        if ($noteId === '') {
+            return $createResponse;
+        }
+
+        $associationResponse = $this->request(
+            'PUT',
+            sprintf(
+                '/crm/v3/objects/notes/%s/associations/%s/%s/%d',
+                $noteId,
+                $associationObjectType,
+                (string) $objectId,
+                $associationType
+            )
+        );
+
+        if (! ($associationResponse['success'] ?? false)) {
+            $createResponse['association'] = [
+                'success' => false,
+                'status_code' => $associationResponse['status_code'] ?? null,
+                'error' => $associationResponse['error'] ?? null,
+                'object_type' => $associationObjectType,
+                'association_type_id' => $associationType,
+            ];
+
+            return $createResponse;
+        }
+
+        $timelineAssociationResponse = $this->request(
+            'PUT',
+            sprintf(
+                '/crm/v3/objects/%s/%s/associations/notes/%s/%d',
+                $associationObjectType,
+                (string) $objectId,
+                $noteId,
+                $recordToNoteAssociationType
+            )
+        );
+
+        if (! ($timelineAssociationResponse['success'] ?? false)) {
+            $createResponse['timeline_association'] = [
+                'success' => false,
+                'status_code' => $timelineAssociationResponse['status_code'] ?? null,
+                'error' => $timelineAssociationResponse['error'] ?? null,
+                'object_type' => $associationObjectType,
+                'association_type_id' => $recordToNoteAssociationType,
+            ];
+
+            return $createResponse;
+        }
+
+        $createResponse['association'] = [
+            'success' => true,
+            'status_code' => $associationResponse['status_code'] ?? null,
+            'object_type' => $associationObjectType,
+            'association_type_id' => $associationType,
+        ];
+        $createResponse['timeline_association'] = [
+            'success' => true,
+            'status_code' => $timelineAssociationResponse['status_code'] ?? null,
+            'object_type' => $associationObjectType,
+            'association_type_id' => $recordToNoteAssociationType,
+        ];
+
+        return $createResponse;
     }
 
     public function request(string $method, string $path, array $payload = [], array $query = []): array
@@ -200,6 +272,26 @@ class HubspotApiServiceRefactored
             'contacts' => 202,
             'companies' => 190,
             'deals' => 214,
+            default => null,
+        };
+    }
+
+    private function resolveAssociationObjectType(string $objectType): ?string
+    {
+        return match ($objectType) {
+            'contacts' => 'contact',
+            'companies' => 'company',
+            'deals' => 'deal',
+            default => null,
+        };
+    }
+
+    private function resolveRecordToNoteAssociationType(string $objectType): ?int
+    {
+        return match ($objectType) {
+            'contacts' => 201,
+            'companies' => 190,
+            'deals' => 213,
             default => null,
         };
     }

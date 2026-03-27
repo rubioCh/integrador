@@ -88,6 +88,46 @@ class SignedQuotesPipelineService
         ];
     }
 
+    /**
+     * @param  array<string, mixed>  $quote
+     * @param  array<string, mixed>  $executionResponse
+     * @return array<string, scalar|null>
+     */
+    public function buildHubspotQuoteSyncProperties(
+        array $quote,
+        string $targetPlatform,
+        array $executionResponse = []
+    ): array {
+        $operations = [];
+        $updatedFields = [];
+
+        foreach ($this->extractQuoteMetadataGroups($quote) as $metadata) {
+            $operation = Arr::get($metadata, 'sync_operation_' . $targetPlatform);
+            if (is_string($operation) && $operation !== '') {
+                $operations[] = $operation;
+            }
+
+            foreach ((array) Arr::get($metadata, 'updated_fields_' . $targetPlatform, []) as $field) {
+                if (is_scalar($field) && trim((string) $field) !== '') {
+                    $updatedFields[] = (string) $field;
+                }
+            }
+        }
+
+        $properties = [
+            'last_sync_' . $targetPlatform => now()->toISOString(),
+            'sync_operation_' . $targetPlatform => $this->resolveAggregateOperation($operations),
+            'updated_fields_' . $targetPlatform => json_encode(array_values(array_unique($updatedFields)), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+        ];
+
+        $externalId = Arr::get($executionResponse, 'external_id');
+        if (is_scalar($externalId) && trim((string) $externalId) !== '') {
+            $properties[$targetPlatform . '_id'] = (string) $externalId;
+        }
+
+        return $properties;
+    }
+
     public function createExternalId(string $targetPlatform, string $entityType, string $reference): string
     {
         $suffix = Str::of($reference)->replaceMatches('/[^a-zA-Z0-9_\-]/', '')->lower();
@@ -183,5 +223,47 @@ class SignedQuotesPipelineService
         }
 
         return $changed;
+    }
+
+    /**
+     * @param  array<string, mixed>  $quote
+     * @return array<int, array<string, mixed>>
+     */
+    private function extractQuoteMetadataGroups(array $quote): array
+    {
+        $groups = [];
+
+        foreach (['company', 'contact'] as $entityKey) {
+            $metadata = Arr::get($quote, 'hubspot_sync_metadata.' . $entityKey, []);
+            if (is_array($metadata) && $metadata !== []) {
+                $groups[] = $metadata;
+            }
+        }
+
+        foreach ((array) Arr::get($quote, 'hubspot_sync_metadata.products', []) as $metadata) {
+            if (is_array($metadata) && $metadata !== []) {
+                $groups[] = $metadata;
+            }
+        }
+
+        return $groups;
+    }
+
+    /**
+     * @param  array<int, string>  $operations
+     */
+    private function resolveAggregateOperation(array $operations): string
+    {
+        $operations = array_values(array_unique(array_filter($operations, static fn (mixed $operation): bool => is_string($operation) && $operation !== '')));
+
+        if ($operations === []) {
+            return 'no_change';
+        }
+
+        if (count($operations) === 1) {
+            return $operations[0];
+        }
+
+        return 'mixed';
     }
 }

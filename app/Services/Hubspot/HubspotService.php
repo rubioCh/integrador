@@ -4,6 +4,7 @@ namespace App\Services\Hubspot;
 
 use App\Jobs\ProcessSignedQuotesJob;
 use App\Models\Event;
+use App\Models\PropertyRelationship;
 use App\Models\Platform;
 use App\Models\Record;
 use App\Services\Base\BaseService;
@@ -396,6 +397,70 @@ class HubspotService extends BaseService
         return $this->success('Company updated in HubSpot.', $response['data']);
     }
 
+    public function syncContactExecutionResponse(array $payload): array
+    {
+        $contactId = $this->resolveHubspotContactIdFromPayload($payload);
+        if ($contactId === null) {
+            return [
+                'success' => false,
+                'message' => 'Missing HubSpot contact id for response write-back.',
+                'data' => [
+                    'required_context' => [
+                        'hubspot_object_id',
+                        'hubspot_contact_id',
+                        'contact.id',
+                        'contact.hubspot_id',
+                        'objectId',
+                        'id',
+                    ],
+                    'received_keys' => array_keys($payload),
+                    'mapping_event_id' => $this->resolveResponseMappingEventId($payload),
+                ],
+            ];
+        }
+
+        $mappingEventId = $this->resolveResponseMappingEventId($payload);
+        $properties = $this->buildHubspotContactPropertiesFromResponse($mappingEventId, $payload);
+
+        if ($properties === []) {
+            return $this->success('No mapped HubSpot properties found in destination response.', [
+                'contact_id' => $contactId,
+                'mapping_event_id' => $mappingEventId,
+                'destination_response_keys' => $this->extractDestinationResponseKeys($payload),
+                'updated_properties' => [],
+            ]);
+        }
+
+        $response = $this->hubspotApi->updateObject('contacts', $contactId, $properties);
+        if (! $response['success']) {
+            $noteResult = $this->tryLogContactFailureNote(
+                'contacts',
+                $contactId,
+                'Failed to store destination response in HubSpot contact.',
+                $response
+            );
+
+            return [
+                'success' => false,
+                'message' => 'Failed to update HubSpot contact from destination response.',
+                'data' => [
+                    'error' => $response['error'] ?? null,
+                    'hubspot_note' => $noteResult,
+                    'contact_id' => $contactId,
+                    'mapping_event_id' => $mappingEventId,
+                    'attempted_properties' => $properties,
+                ],
+            ];
+        }
+
+        return $this->success('HubSpot contact updated from destination response.', [
+            'contact_id' => $contactId,
+            'mapping_event_id' => $mappingEventId,
+            'updated_properties' => $properties,
+            'hubspot_response' => $response['data'] ?? [],
+        ]);
+    }
+
     public function testConnection(): array
     {
         $token = config('hubspot.access_token');
@@ -507,11 +572,16 @@ class HubspotService extends BaseService
             ];
         }
 
-        $noteResponse = $this->hubspotApi->addNoteToObject('contacts', $objectId, $message, [
+        $noteResponse = $this->hubspotApi->addNoteToObject(
+            'contacts',
+            $objectId,
+            $this->buildOperationalContactFailureNote($message, $response),
+            [
             'event_id' => $this->event?->id,
             'record_id' => $this->record?->id,
             'error_message' => $response['message'] ?? null,
-        ]);
+            ]
+        );
 
         return [
             'attempted' => true,
@@ -521,5 +591,178 @@ class HubspotService extends BaseService
             'status_code' => $noteResponse['status_code'] ?? null,
             'error' => $noteResponse['error'] ?? null,
         ];
+    }
+
+    private function resolveHubspotContactIdFromPayload(array $payload): ?string
+    {
+        $candidates = [
+            Arr::get($payload, 'hubspot_contact_id'),
+            Arr::get($payload, 'hubspot_object_id'),
+            Arr::get($payload, 'contact.id'),
+            Arr::get($payload, 'contact.hubspot_id'),
+            Arr::get($payload, 'hubspot_id'),
+            Arr::get($payload, 'objectId'),
+            Arr::get($payload, 'id'),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (! is_scalar($candidate)) {
+                continue;
+            }
+
+            $value = trim((string) $candidate);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    private function resolveResponseMappingEventId(array $payload): ?int
+    {
+        $candidate = $this->event?->meta['response_mapping_event_id']
+            ?? Arr::get($payload, 'destination_execution.source_event_id')
+            ?? Arr::get($payload, 'source_event_id');
+
+        return is_numeric($candidate) ? (int) $candidate : null;
+    }
+
+    /**
+     * @return array<string, scalar|null>
+     */
+    private function buildHubspotContactPropertiesFromResponse(?int $mappingEventId, array $payload): array
+    {
+        if (! $mappingEventId) {
+            return [];
+        }
+
+        $mappingEvent = Event::query()
+            ->with(['propertyRelationships.property', 'propertyRelationships.relatedProperty'])
+            ->find($mappingEventId);
+
+        if (! $mappingEvent) {
+            return [];
+        }
+
+        $properties = [];
+        $responseData = Arr::get($payload, 'destination_response.data', []);
+        $responseNestedData = Arr::get($responseData, 'data', []);
+
+        $relationships = $mappingEvent->propertyRelationships
+            ->filter(static fn (PropertyRelationship $relationship): bool => (bool) $relationship->active);
+
+        foreach ($relationships as $relationship) {
+            $hubspotKey = $relationship->property?->key ?: $relationship->property?->name;
+            $targetKey = $relationship->relatedProperty?->key ?: $relationship->relatedProperty?->name;
+
+            if (! is_string($hubspotKey) || trim($hubspotKey) === '' || ! is_string($targetKey) || trim($targetKey) === '') {
+                continue;
+            }
+
+            $value = $this->firstMappedValue([
+                Arr::get($responseData, $targetKey),
+                Arr::get($responseNestedData, $targetKey),
+            ]);
+
+            if ($value === null) {
+                continue;
+            }
+
+            $properties[$hubspotKey] = $this->normalizeHubspotPropertyValue($value);
+        }
+
+        return $properties;
+    }
+
+    private function firstMappedValue(array $candidates): mixed
+    {
+        foreach ($candidates as $candidate) {
+            if ($candidate === null) {
+                continue;
+            }
+
+            return $candidate;
+        }
+
+        return null;
+    }
+
+    private function normalizeHubspotPropertyValue(mixed $value): mixed
+    {
+        if (is_scalar($value) || $value === null) {
+            return $value;
+        }
+
+        return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+    }
+
+    private function buildOperationalContactFailureNote(string $message, array $response): string
+    {
+        $propertyName = $this->extractHubspotErrorPropertyName($response);
+        $errorCode = $this->extractHubspotErrorCode($response);
+        $category = Arr::get($response, 'error.category');
+
+        return trim(implode("\n", array_filter([
+            '[Integrador] Error de sincronizacion de contacto',
+            'Operacion: ' . $this->resolveOperationalFailureLabel(),
+            'Evento: ' . ($this->event?->name ?: $this->event?->event_type_id ?: 'N/A'),
+            'Motivo: ' . trim($message),
+            $propertyName ? 'Propiedad: ' . $propertyName : null,
+            $errorCode ? 'Codigo: ' . $errorCode : null,
+            is_string($category) && trim($category) !== '' ? 'Categoria: ' . $category : null,
+            $this->record?->id ? 'Record: #' . $this->record->id : null,
+            'Fecha: ' . now()->toISOString(),
+        ])));
+    }
+
+    private function resolveOperationalFailureLabel(): string
+    {
+        $method = $this->event?->method_name;
+
+        return match ($method) {
+            'syncContactExecutionResponse' => 'write-back a HubSpot',
+            'updateObject' => 'actualizacion de contacto en HubSpot',
+            'createObject' => 'creacion de contacto en HubSpot',
+            default => 'sincronizacion de contacto',
+        };
+    }
+
+    private function extractHubspotErrorPropertyName(array $response): ?string
+    {
+        $contextProperty = Arr::get($response, 'error.errors.0.context.propertyName.0');
+        if (is_scalar($contextProperty) && trim((string) $contextProperty) !== '') {
+            return trim((string) $contextProperty);
+        }
+
+        return null;
+    }
+
+    private function extractHubspotErrorCode(array $response): ?string
+    {
+        $errorCode = Arr::get($response, 'error.errors.0.code')
+            ?? Arr::get($response, 'error.code');
+
+        if (! is_scalar($errorCode) || trim((string) $errorCode) === '') {
+            return null;
+        }
+
+        return trim((string) $errorCode);
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function extractDestinationResponseKeys(array $payload): array
+    {
+        $responseData = Arr::get($payload, 'destination_response.data', []);
+        if (! is_array($responseData)) {
+            return [];
+        }
+
+        return array_values(array_map(
+            static fn (mixed $key): string => (string) $key,
+            array_keys($responseData)
+        ));
     }
 }

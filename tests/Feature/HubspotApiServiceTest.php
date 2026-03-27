@@ -59,6 +59,8 @@ class HubspotApiServiceTest extends TestCase
             'https://api.hubapi.test/crm/v3/objects/notes' => Http::response([
                 'id' => '9001',
             ], 201),
+            'https://api.hubapi.test/crm/v3/objects/notes/9001/associations/contact/123/202' => Http::response([], 204),
+            'https://api.hubapi.test/crm/v3/objects/contact/123/associations/notes/9001/201' => Http::response([], 204),
         ]);
 
         $service = app(HubspotApiServiceRefactored::class);
@@ -69,5 +71,45 @@ class HubspotApiServiceTest extends TestCase
         $this->assertTrue($result['success']);
         $this->assertSame(201, $result['status_code']);
         $this->assertSame('9001', $result['data']['id']);
+        $this->assertTrue((bool) ($result['association']['success'] ?? false));
+        $this->assertTrue((bool) ($result['timeline_association']['success'] ?? false));
+    }
+
+    public function test_add_note_to_object_includes_multiline_message_body(): void
+    {
+        config()->set('hubspot.access_token', 'token_123');
+        config()->set('hubspot.base_url', 'https://api.hubapi.test');
+        config()->set('hubspot.note_association_type_ids.contacts', 202);
+
+        Http::fake([
+            'https://api.hubapi.test/crm/v3/objects/notes' => Http::response([
+                'id' => '9002',
+            ], 201),
+            'https://api.hubapi.test/crm/v3/objects/notes/9002/associations/contact/123/202' => Http::response([], 204),
+            'https://api.hubapi.test/crm/v3/objects/contact/123/associations/notes/9002/201' => Http::response([], 204),
+        ]);
+
+        $service = app(HubspotApiServiceRefactored::class);
+        $result = $service->addNoteToObject(
+            'contacts',
+            '123',
+            "[Integrador] Error de sincronizacion de contacto\nOperacion: write-back a HubSpot\nPropiedad: hs_object_id",
+            ['event_id' => 10]
+        );
+
+        $this->assertTrue($result['success']);
+
+        Http::assertSent(function ($request): bool {
+            $body = $request->data()['properties']['hs_note_body'] ?? '';
+
+            return str_contains($body, '[Integrador] Error de sincronizacion de contacto')
+                && str_contains($body, 'Operacion: write-back a HubSpot')
+                && str_contains($body, 'Propiedad: hs_object_id');
+        });
+
+        Http::assertSent(fn ($request): bool => $request->method() === 'PUT'
+            && $request->url() === 'https://api.hubapi.test/crm/v3/objects/notes/9002/associations/contact/123/202');
+        Http::assertSent(fn ($request): bool => $request->method() === 'PUT'
+            && $request->url() === 'https://api.hubapi.test/crm/v3/objects/contact/123/associations/notes/9002/201');
     }
 }

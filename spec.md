@@ -1,7 +1,7 @@
 # spec.md
 
 Sistema: INTEGRADOR - Sistema de Integracion Multiplataforma
-Version: 1.1.1
+Version: 1.1.2
 Estado: LOCKED
 Tipo: Especificacion Oficial del Sistema
 
@@ -218,6 +218,7 @@ Webhook
 - `createObject(): mixed`
 - `updateObject(): void`
 - `updateCompany(array $payload): array`
+- `syncContactExecutionResponse(array $payload): array`
 
 ## 5.6 OdooService
 
@@ -250,6 +251,23 @@ Webhook
 - `buildBasicAuthHeaders(Platform $platform): array`
 - `getOAuth2AccessToken(Platform $platform): string`
 - `buildOAuth2Headers(Platform $platform): array`
+
+## 5.9 Notas de Error en HubSpot
+
+- Cuando falle una sincronizacion de contacto cuyo flujo involucre HubSpot, el sistema DEBE intentar registrar una nota en el objeto HubSpot correspondiente.
+- La nota DEBE crearse desde un Job o Service; NUNCA desde un Listener.
+- El identificador tecnico del objeto (`hubspot_object_id` o equivalente) DEBE resolverse como contexto tecnico del flujo y NO forma parte del mapping de propiedades.
+- Las propiedades de negocio a escribir en HubSpot DEBEN salir exclusivamente del mapping configurado y/o de `destination_response.data`.
+- La nota DEBE incluir, cuando exista:
+  - tipo de operacion (`create`, `update`, `write-back`, `generic.external.call`)
+  - mensaje resumido del fallo
+  - propiedad involucrada si la plataforma la identifica
+  - codigo o categoria del error (`READ_ONLY_VALUE`, `VALIDATION_ERROR`, `404`, etc.)
+  - `record_id` y `event_id`
+  - timestamp
+- La nota NO DEBE incluir secretos, tokens, headers sensibles ni payloads completos.
+- El resultado del intento de crear la nota DEBE almacenarse en `Record.details.hubspot_note`.
+- Si la nota falla, el flujo principal DEBE conservar el error original y registrar por separado el resultado del intento de nota.
 
 ---
 
@@ -378,6 +396,19 @@ Las siguientes capacidades existen en `/Users/hint/laravel-sites/integrador` y D
   5. `UpdateHubSpotJob`
   6. `CreateQuoteJob`
 - El flujo debe actualizar Records y permitir reintentos por job.
+
+## 9.6.1 Notas Operativas de Fallo en Contactos
+
+- En fallos de sincronizacion de contactos, el sistema DEBE intentar agregar una nota visible en el contacto HubSpot afectado.
+- Casos minimos que deben intentar nota:
+  - error al crear o actualizar el contacto en plataforma destino
+  - error al hacer write-back de respuesta hacia HubSpot
+  - error de validacion de propiedades
+  - error por propiedad de solo lectura
+  - error por contexto tecnico faltante (`hubspot_object_id` o equivalente)
+  - error HTTP relevante de integracion (`4xx`, `5xx`, timeout)
+- La nota DEBE ser breve y entendible por el usuario final; el detalle tecnico completo debe permanecer en `Record.details`.
+- El sistema DEBE preferir mensajes accionables, por ejemplo indicando la propiedad que fallo cuando la plataforma lo reporte.
 
 ## 9.7 Validacion y Actualizacion Inteligente de Entidades
 
