@@ -1,7 +1,7 @@
 # spec.md
 
 Sistema: INTEGRADOR - Sistema de Integracion Multiplataforma
-Version: 1.1.2
+Version: 1.1.3
 Estado: LOCKED
 Tipo: Especificacion Oficial del Sistema
 
@@ -269,6 +269,23 @@ Webhook
 - El resultado del intento de crear la nota DEBE almacenarse en `Record.details.hubspot_note`.
 - Si la nota falla, el flujo principal DEBE conservar el error original y registrar por separado el resultado del intento de nota.
 
+## 5.10 Propiedades Tecnicas de Control por Plataforma
+
+- Para flujos de sincronizacion manual/controlada desde HubSpot, el sistema DEBE soportar propiedades tecnicas por plataforma con el patron `sync_to_{platform}`.
+- `sync_to_{platform}` actua como propiedad disparadora del flujo y NO representa un campo de negocio de la entidad.
+- El cambio de `sync_to_{platform}` DEBE disparar el envio del grupo completo de propiedades mapeadas para esa plataforma, no un delta parcial por cada propiedad de negocio modificada.
+- Valores recomendados para `sync_to_{platform}`:
+  - `pending`
+  - `processing`
+  - `synced`
+  - `error`
+- Para cada plataforma integrada se DEBEN considerar al menos estas propiedades tecnicas en HubSpot:
+  - `{platform}_id`
+  - `last_sync_{platform}`
+  - `sync_status_{platform}`
+  - `last_error_{platform}`
+- Las propiedades tecnicas NO deben disparar nuevos envios hacia la misma plataforma salvo la propiedad de control `sync_to_{platform}` cuando cambie a `pending`.
+
 ---
 
 # 6. Contrato de Respuesta Normalizada (Integraciones HTTP)
@@ -409,6 +426,23 @@ Las siguientes capacidades existen en `/Users/hint/laravel-sites/integrador` y D
   - error HTTP relevante de integracion (`4xx`, `5xx`, timeout)
 - La nota DEBE ser breve y entendible por el usuario final; el detalle tecnico completo debe permanecer en `Record.details`.
 - El sistema DEBE preferir mensajes accionables, por ejemplo indicando la propiedad que fallo cuando la plataforma lo reporte.
+
+## 9.6.2 Sincronizacion Controlada por Propiedad Tecnica
+
+- Para contactos y futuras entidades sincronizadas desde HubSpot hacia plataformas externas, el sistema DEBE permitir un patron de disparo por propiedad tecnica de control por plataforma.
+- Ejemplo canónico para ASPEL:
+  - `sync_to_aspel = pending` dispara el flujo HubSpot -> ASPEL
+  - el payload enviado hacia ASPEL debe contener el grupo completo de propiedades mapeadas del contacto
+  - el write-back a HubSpot debe actualizar el estado tecnico del flujo (`aspel_id`, `last_sync_aspel`, `sync_status_aspel`, `last_error_aspel`, `sync_to_aspel`)
+- El disparo NO debe depender de cada propiedad de negocio individual (`phone`, `email`, `rfc`, etc.).
+- El flujo DEBE evitar ciclos de integracion con estas reglas minimas:
+  - solo `sync_to_{platform} = pending` puede iniciar el envio manual/controlado
+  - las propiedades tecnicas de write-back NO deben reactivar el flujo
+  - el integrador NO debe volver a colocar `sync_to_{platform} = pending` automaticamente
+- El patron debe ser extensible a nuevas plataformas con el esquema:
+  - `sync_to_odoo`, `sync_status_odoo`, `last_sync_odoo`, `odoo_id`, `last_error_odoo`
+  - `sync_to_netsuite`, `sync_status_netsuite`, `last_sync_netsuite`, `netsuite_id`, `last_error_netsuite`
+- Para plataformas implementadas temporalmente mediante `generic.external.call`, el patron de propiedad de control sigue siendo valido y debe coexistir con el contrato HTTP normalizado.
 
 ## 9.7 Validacion y Actualizacion Inteligente de Entidades
 

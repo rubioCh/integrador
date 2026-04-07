@@ -1,8 +1,8 @@
 # agents.md
 
 Proyecto: INTEGRADOR - Sistema de Integracion Multiplataforma (Laravel 11 + Inertia)
-Basado en: spec.md v1.1.1
-Version: 1.3
+Basado en: spec.md v1.1.3
+Version: 1.4
 Estado: ACTIVE
 
 ---
@@ -31,6 +31,7 @@ Construir un sistema de integración multiplataforma que sincronice datos entre 
 9. Respetar jerarquia de roles `superadmin > admin > operator`.
 10. Mantener y ejecutar seeder obligatorio de superadmin bootstrap.
 11. En errores de sincronización de contactos relacionados con HubSpot, intentar registrar una nota visible en el objeto HubSpot afectado y guardar el resultado en `Record.details.hubspot_note`.
+12. Modelar sincronizaciones manuales/controladas por plataforma usando propiedades técnicas `sync_to_{platform}` y write-back de estado técnico en HubSpot.
 
 ### 2.4 Límites
 1. No inventar endpoints, credenciales o comportamientos no descritos.
@@ -39,6 +40,7 @@ Construir un sistema de integración multiplataforma que sincronice datos entre 
 4. Detenerse si faltan datos necesarios y pedirlos.
 5. No procesar eventos síncronamente cuando puedan ser Jobs asíncronos.
 6. No usar el id técnico de HubSpot como propiedad mapeada editable; debe viajar como contexto técnico del flujo.
+7. No disparar sincronizaciones de negocio por cambios en propiedades técnicas de write-back (`{platform}_id`, `last_sync_{platform}`, `sync_status_{platform}`, `last_error_{platform}`).
 
 ### 2.5 Herramientas permitidas
 1. Laravel 11 Framework.
@@ -56,6 +58,8 @@ Eres un desarrollador senior con experiencia en Laravel 11 e Inertia.js. Debes i
 **REGLA CRÍTICA**: Los Listeners SOLO deben disparar Jobs usando `Job::dispatch()`. NO deben llamar a `helpers()->forwarding()` ni hacer procesamiento pesado. Todo el procesamiento debe estar en Jobs.
 
 **REGLA DE CONTEXTO HUBSPOT**: `hubspot_object_id` y equivalentes se usan solo para identificar el objeto a actualizar. Las propiedades a escribir deben salir exclusivamente del mapping configurado o de `destination_response.data`, nunca del contexto técnico.
+
+**REGLA DE CONTROL POR PLATAFORMA**: Para flujos manuales/controlados, el trigger debe vivir en una propiedad técnica `sync_to_{platform}`. Esa propiedad dispara el envío del grupo completo de datos mapeados para la plataforma; no deben dispararse sincronizaciones por cada cambio de propiedad de negocio.
 
 Si falta información, detente y pide aclaración. Convierte eventos que puedan ser asíncronos en Jobs.
 
@@ -352,6 +356,8 @@ Models
 - Notas de fallo en HubSpot: en fallos de sincronización de contacto sobre flujos HubSpot (create/update/write-back/generic.external.call), el sistema debe intentar registrar una nota en el contacto de HubSpot y guardar el resultado de ese intento en `Record.details.hubspot_note`.
 - Contexto técnico HubSpot: `hubspot_object_id` y equivalentes deben resolverse como contexto del flujo; NO deben depender de `property_relationships` ni escribirse como propiedad editable.
 - Write-back de respuesta: cuando un flujo genérico exitoso encadene de regreso a HubSpot, el siguiente evento debe tomar como base `destination_response.data` más contexto técnico mínimo (`hubspot_object_id`, `source_event_id`, etc.), evitando reutilizar el payload completo del evento anterior.
+- Propiedades técnicas por plataforma: para HubSpot -> plataforma externa, se debe favorecer el patrón `sync_to_{platform}`, `sync_status_{platform}`, `last_sync_{platform}`, `{platform}_id`, `last_error_{platform}`.
+- Triggers por plataforma: el disparo de sincronización controlada debe configurarse sobre `sync_to_{platform} = pending`, no sobre cada propiedad de negocio individual.
 
 ## 8) Contratos clave (Interfaces)
 ### 8.1 EventProcessingService
