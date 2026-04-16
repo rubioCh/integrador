@@ -8,12 +8,14 @@ import { Link, router } from '@inertiajs/vue3';
 const props = defineProps({
     properties: { type: Object, required: true },
     platforms: { type: Array, default: () => [] },
+    categories: { type: Array, default: () => [] },
     property_types: { type: Array, default: () => [] },
     filters: { type: Object, default: () => ({}) },
 });
 
 const filters = reactive({
     platform_id: props.filters.platform_id ?? '',
+    category_id: props.filters.category_id ?? '',
     type: props.filters.type ?? '',
     search: props.filters.search ?? '',
 });
@@ -23,6 +25,7 @@ const remove = (id) => router.delete(`/admin/properties/${id}`, { preserveScroll
 const applyFilters = () => {
     router.get('/admin/properties', {
         platform_id: filters.platform_id || undefined,
+        category_id: filters.category_id || undefined,
         type: filters.type || undefined,
         search: filters.search || undefined,
     }, {
@@ -34,6 +37,7 @@ const applyFilters = () => {
 
 const resetFilters = () => {
     filters.platform_id = '';
+    filters.category_id = '';
     filters.type = '';
     filters.search = '';
     router.get('/admin/properties', {}, {
@@ -83,6 +87,16 @@ const resetFilters = () => {
                 </select>
             </label>
 
+            <label>
+                <span>Categoría</span>
+                <select v-model="filters.category_id">
+                    <option value="">Todas</option>
+                    <option v-for="category in props.categories" :key="category.id" :value="String(category.id)">
+                        {{ category.name }}
+                    </option>
+                </select>
+            </label>
+
             <div class="filter-actions">
                 <button type="submit" class="secondary">Aplicar</button>
                 <button type="button" class="ghost" @click="resetFilters">Limpiar</button>
@@ -103,6 +117,7 @@ const resetFilters = () => {
                         <th>Key</th>
                         <th>Type</th>
                         <th>Plataforma</th>
+                        <th>Categorías</th>
                         <th>Requerida</th>
                         <th>Activa</th>
                         <th>Acciones</th>
@@ -115,6 +130,14 @@ const resetFilters = () => {
                         <td>{{ property.key }}</td>
                         <td>{{ property.type }}</td>
                         <td>{{ property.platform?.name ?? 'n/a' }}</td>
+                        <td>
+                            <div v-if="property.categories?.length" class="category-list">
+                                <span v-for="category in property.categories" :key="category.id" class="category-badge">
+                                    {{ category.name }}
+                                </span>
+                            </div>
+                            <span v-else class="muted">Sin categoría</span>
+                        </td>
                         <td>{{ property.required ? 'Sí' : 'No' }}</td>
                         <td>{{ property.active ? 'Sí' : 'No' }}</td>
                         <td class="actions-cell">
@@ -131,7 +154,7 @@ const resetFilters = () => {
 
 <style scoped>
 .toolbar{display:flex;justify-content:flex-end;margin-bottom:10px}
-.filters{display:grid;grid-template-columns:minmax(220px,1fr) minmax(180px,240px) minmax(150px,190px) auto;gap:12px;align-items:end;border:1px solid #dbe4ef;border-radius:14px;background:#f8fafc;padding:12px;margin-bottom:12px}
+.filters{display:grid;grid-template-columns:minmax(220px,1fr) minmax(180px,220px) minmax(140px,180px) minmax(170px,220px) auto;gap:12px;align-items:end;border:1px solid #dbe4ef;border-radius:14px;background:#f8fafc;padding:12px;margin-bottom:12px}
 .filters label{display:grid;gap:6px}
 .filters span{font-size:12px;font-weight:700;color:#475569}
 .filters input,.filters select{width:100%;border:1px solid #cbd5e1;border-radius:10px;background:#fff;color:#0f172a;font-size:14px;padding:9px 11px}
@@ -142,6 +165,9 @@ table{width:100%;border-collapse:collapse}
 th,td{border-bottom:1px solid #e2e8f0;padding:10px 8px;text-align:left;font-size:13px}
 th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#475569}
 .actions-cell{white-space:nowrap}
+.category-list{display:flex;flex-wrap:wrap;gap:5px}
+.category-badge{display:inline-flex;align-items:center;border:1px solid #cbd5e1;border-radius:999px;background:#fff;color:#334155;font-size:11px;padding:3px 7px}
+.muted{color:#94a3b8;font-size:12px}
 .primary,.secondary{border:1px solid #1d4ed8;background:#1d4ed8;color:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;text-decoration:none}
 .secondary{border-color:#cbd5e1;background:#f8fafc;color:#334155}
 .ghost{border:1px solid transparent;background:transparent;color:#475569;border-radius:8px;padding:8px 10px;cursor:pointer}

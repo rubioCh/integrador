@@ -322,12 +322,16 @@ class AdminPanelController extends Controller
     {
         $filters = [
             'platform_id' => $request->string('platform_id')->toString(),
+            'category_id' => $request->string('category_id')->toString(),
             'type' => $request->string('type')->toString(),
             'search' => $request->string('search')->toString(),
         ];
 
         $query = Property::query()
-            ->with('platform:id,name,slug,type');
+            ->with([
+                'platform:id,name,slug,type',
+                'categories:id,name,slug',
+            ]);
 
         if ($filters['platform_id'] !== '') {
             $query->where('platform_id', (int) $filters['platform_id']);
@@ -335,6 +339,12 @@ class AdminPanelController extends Controller
 
         if ($filters['type'] !== '') {
             $query->where('type', $filters['type']);
+        }
+
+        if ($filters['category_id'] !== '') {
+            $query->whereHas('categories', static function ($query) use ($filters): void {
+                $query->where('categories.id', (int) $filters['category_id']);
+            });
         }
 
         if ($filters['search'] !== '') {
@@ -360,6 +370,11 @@ class AdminPanelController extends Controller
                     'required' => (bool) $property->required,
                     'active' => (bool) $property->active,
                     'meta' => $property->meta ?? [],
+                    'categories' => $property->categories->map(static fn (Category $category): array => [
+                        'id' => $category->id,
+                        'name' => $category->name,
+                        'slug' => $category->slug,
+                    ])->values(),
                     'platform' => $property->platform ? [
                         'id' => $property->platform->id,
                         'name' => $property->platform->name,
@@ -373,6 +388,11 @@ class AdminPanelController extends Controller
             ->where('active', true)
             ->orderBy('name')
             ->get(['id', 'name', 'slug', 'type']);
+
+        $categories = Category::query()
+            ->where('active', true)
+            ->orderBy('name')
+            ->get(['id', 'name', 'slug']);
 
         $defaultTypes = collect(['string', 'integer', 'float', 'boolean', 'datetime', 'file']);
         $propertyTypes = Property::query()
@@ -389,6 +409,7 @@ class AdminPanelController extends Controller
         return inertia('Admin/Properties', [
             'properties' => $properties,
             'platforms' => $platforms,
+            'categories' => $categories,
             'property_types' => $propertyTypes,
             'filters' => $filters,
         ]);
@@ -564,8 +585,21 @@ class AdminPanelController extends Controller
         return inertia('Admin/Categories', [
             'categories' => $categories,
             'properties' => Property::query()
+                ->with('platform:id,name,slug,type')
                 ->orderBy('name')
-                ->get(['id', 'name', 'key']),
+                ->get(['id', 'platform_id', 'name', 'key'])
+                ->map(static fn (Property $property): array => [
+                    'id' => $property->id,
+                    'platform_id' => $property->platform_id,
+                    'name' => $property->name,
+                    'key' => $property->key,
+                    'platform' => $property->platform ? [
+                        'id' => $property->platform->id,
+                        'name' => $property->platform->name,
+                        'slug' => $property->platform->slug,
+                        'type' => $property->platform->type,
+                    ] : null,
+                ]),
         ]);
     }
 
@@ -575,8 +609,21 @@ class AdminPanelController extends Controller
             'mode' => 'create',
             'category' => null,
             'properties' => Property::query()
+                ->with('platform:id,name,slug,type')
                 ->orderBy('name')
-                ->get(['id', 'name', 'key']),
+                ->get(['id', 'platform_id', 'name', 'key'])
+                ->map(static fn (Property $property): array => [
+                    'id' => $property->id,
+                    'platform_id' => $property->platform_id,
+                    'name' => $property->name,
+                    'key' => $property->key,
+                    'platform' => $property->platform ? [
+                        'id' => $property->platform->id,
+                        'name' => $property->platform->name,
+                        'slug' => $property->platform->slug,
+                        'type' => $property->platform->type,
+                    ] : null,
+                ]),
         ]);
     }
 
@@ -595,8 +642,21 @@ class AdminPanelController extends Controller
                 'property_ids' => $category->properties->pluck('id')->all(),
             ],
             'properties' => Property::query()
+                ->with('platform:id,name,slug,type')
                 ->orderBy('name')
-                ->get(['id', 'name', 'key']),
+                ->get(['id', 'platform_id', 'name', 'key'])
+                ->map(static fn (Property $property): array => [
+                    'id' => $property->id,
+                    'platform_id' => $property->platform_id,
+                    'name' => $property->name,
+                    'key' => $property->key,
+                    'platform' => $property->platform ? [
+                        'id' => $property->platform->id,
+                        'name' => $property->platform->name,
+                        'slug' => $property->platform->slug,
+                        'type' => $property->platform->type,
+                    ] : null,
+                ]),
         ]);
     }
 
