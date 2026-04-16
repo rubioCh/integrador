@@ -7,6 +7,7 @@ use App\Models\Platform;
 use App\Models\Record;
 use App\Services\Hubspot\HubspotFilePropertyService;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
 
 class EventProcessingService
 {
@@ -32,13 +33,13 @@ class EventProcessingService
             ->where('active', true)
             ->get();
 
-        if ($events->isEmpty()) {
-            $events = Event::query()
+        $events = $events->merge(
+            Event::query()
                 ->where('platform_id', $platform->id)
                 ->where('event_type_id', $subscriptionType)
                 ->where('active', true)
-                ->get();
-        }
+                ->get()
+        )->unique('id')->values();
 
         if ($events->isEmpty()) {
             $events = Event::query()
@@ -151,9 +152,41 @@ class EventProcessingService
 
     public function getServiceClass(Platform $platform): ?string
     {
+        $platformDriverClassList = app()->bound('platformDriverClassList') ? app('platformDriverClassList') : [];
+        $driverKey = $this->resolvePlatformDriverKey($platform);
+
+        if ($driverKey !== null && isset($platformDriverClassList[$driverKey])) {
+            return $platformDriverClassList[$driverKey];
+        }
+
         $platformClassList = app()->bound('platformClassList') ? app('platformClassList') : [];
 
         return $platformClassList[$platform->type] ?? null;
+    }
+
+    private function resolvePlatformDriverKey(Platform $platform): ?string
+    {
+        $settings = is_array($platform->settings) ? $platform->settings : [];
+        $credentials = is_array($platform->credentials) ? $platform->credentials : [];
+
+        foreach ([
+            $settings['service_driver'] ?? null,
+            $settings['integration_driver'] ?? null,
+            $credentials['service_driver'] ?? null,
+        ] as $candidate) {
+            if (is_string($candidate) && trim($candidate) !== '') {
+                return Str::lower(trim($candidate));
+            }
+        }
+
+        $slug = Str::lower(trim((string) $platform->slug));
+        $name = Str::lower(trim((string) $platform->name));
+
+        if ($platform->type === 'generic' && (Str::startsWith($slug, 'aspel') || Str::contains($name, 'aspel'))) {
+            return 'aspel';
+        }
+
+        return null;
     }
 
     public function dispatchEvent(Event $event, Record $record, array $data): void

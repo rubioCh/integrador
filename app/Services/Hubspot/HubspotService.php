@@ -420,7 +420,10 @@ class HubspotService extends BaseService
         }
 
         $mappingEventId = $this->resolveResponseMappingEventId($payload);
-        $properties = $this->buildHubspotContactPropertiesFromResponse($mappingEventId, $payload);
+        $properties = array_merge(
+            $this->buildHubspotContactPropertiesFromResponse($mappingEventId, $payload),
+            $this->buildPlatformSyncSuccessProperties($payload)
+        );
 
         if ($properties === []) {
             return $this->success('No mapped HubSpot properties found in destination response.', [
@@ -748,6 +751,56 @@ class HubspotService extends BaseService
         }
 
         return trim((string) $errorCode);
+    }
+
+    /**
+     * @return array<string, scalar|null>
+     */
+    private function buildPlatformSyncSuccessProperties(array $payload): array
+    {
+        $targetPlatform = $this->resolveTargetPlatformKey($payload);
+        if ($targetPlatform === null) {
+            return [];
+        }
+
+        $controlProperty = $this->resolvePlatformControlProperty($targetPlatform, $payload);
+
+        return [
+            $controlProperty => 'synced',
+            'sync_status_' . $targetPlatform => 'success',
+            'last_sync_' . $targetPlatform => now()->toISOString(),
+            'last_error_' . $targetPlatform => '',
+        ];
+    }
+
+    private function resolveTargetPlatformKey(array $payload): ?string
+    {
+        $candidates = [
+            $this->event?->meta['target_platform'] ?? null,
+            Arr::get($payload, 'target_platform'),
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (! is_string($candidate) || trim($candidate) === '') {
+                continue;
+            }
+
+            return strtolower(trim($candidate));
+        }
+
+        return null;
+    }
+
+    private function resolvePlatformControlProperty(string $targetPlatform, array $payload): string
+    {
+        $candidate = $this->event?->meta['control_property']
+            ?? Arr::get($payload, 'control_property');
+
+        if (is_string($candidate) && trim($candidate) !== '') {
+            return trim($candidate);
+        }
+
+        return 'sync_to_' . $targetPlatform;
     }
 
     /**

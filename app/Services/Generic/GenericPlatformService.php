@@ -159,6 +159,24 @@ class GenericPlatformService extends BaseService implements GenericPlatformPort
         return array_merge($default, $configPolicy, $eventPolicy);
     }
 
+    public function executeEndpointCall(array $payload, GenericHttpAdapter $httpAdapter): array
+    {
+        if (! $this->event) {
+            throw new \RuntimeException('Generic platform event context is required for endpoint execution.');
+        }
+
+        return $httpAdapter->send(
+            $this->platform->type ?? 'generic',
+            $this->resolveEndpoint($this->event),
+            $this->resolveMethod($this->event),
+            $this->resolveHeaders($this->event, $this->platform),
+            $this->resolveQueryParams($this->event, $payload),
+            $this->resolveBody($this->event, $payload),
+            $this->resolveTimeout($this->event),
+            $this->resolveRetryPolicy($this->event)
+        );
+    }
+
     private function getHttpConfig(Event $event): ?EventHttpConfig
     {
         $event->loadMissing('httpConfig');

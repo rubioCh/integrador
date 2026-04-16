@@ -48,13 +48,15 @@ class EventLoggingService
 
     public function logEventError(Record $record, Exception $exception): void
     {
+        $existingDetails = is_array($record->details) ? $record->details : [];
+
         $record->update([
             'status' => 'error',
             'message' => $exception->getMessage(),
-            'details' => [
+            'details' => array_merge($existingDetails, [
                 'exception' => get_class($exception),
                 'code' => $exception->getCode(),
-            ],
+            ]),
         ]);
     }
 

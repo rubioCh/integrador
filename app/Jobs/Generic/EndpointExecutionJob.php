@@ -6,6 +6,7 @@ use App\Models\Event;
 use App\Models\EventIdempotencyKey;
 use App\Models\Record;
 use App\Services\EventLoggingService;
+use App\Services\EventProcessingService;
 use App\Services\Generic\GenericHttpAdapter;
 use App\Services\Generic\GenericPlatformService;
 use App\Services\Hubspot\HubspotApiServiceRefactored;
@@ -37,43 +38,35 @@ class EndpointExecutionJob implements ShouldQueue
     }
 
     public function handle(
-        GenericPlatformService $genericPlatformService,
+        EventProcessingService $eventProcessingService,
         GenericHttpAdapter $httpAdapter,
         EventLoggingService $eventLoggingService,
         RateLimitService $rateLimitService,
         ?HubspotApiServiceRefactored $hubspotApiService = null
     ): void {
         $hubspotApiService ??= app(HubspotApiServiceRefactored::class);
+        $platformService = $this->resolvePlatformService($eventProcessingService);
 
         $this->record->update([
             'status' => 'processing',
             'message' => 'Executing generic endpoint',
         ]);
 
-        $endpoint = $genericPlatformService->resolveEndpoint($this->event);
-        $method = $genericPlatformService->resolveMethod($this->event);
-        $headers = $genericPlatformService->resolveHeaders($this->event, $this->event->platform);
-        $query = $genericPlatformService->resolveQueryParams($this->event, $this->payload);
-        $body = $genericPlatformService->resolveBody($this->event, $this->payload);
-        $timeout = $genericPlatformService->resolveTimeout($this->event);
-        $retryPolicy = $genericPlatformService->resolveRetryPolicy($this->event);
-        $idempotencyPolicy = $genericPlatformService->resolveIdempotencyPolicy($this->event);
+        $endpoint = $platformService->resolveEndpoint($this->event);
+        $method = $platformService->resolveMethod($this->event);
+        $headers = $platformService->resolveHeaders($this->event, $this->event->platform);
+        $query = $platformService->resolveQueryParams($this->event, $this->payload);
+        $body = $platformService->resolveBody($this->event, $this->payload);
+        $timeout = $platformService->resolveTimeout($this->event);
+        $retryPolicy = $platformService->resolveRetryPolicy($this->event);
+        $idempotencyPolicy = $platformService->resolveIdempotencyPolicy($this->event);
         $idempotency = $this->acquireIdempotencyKey($endpoint, $method, $idempotencyPolicy, $eventLoggingService);
         if ($idempotency['skip']) {
             return;
         }
         $idempotencyModel = $idempotency['model'];
 
-        $response = $httpAdapter->send(
-            $this->event->platform?->type ?? 'generic',
-            $endpoint,
-            $method,
-            $headers,
-            $query,
-            $body,
-            $timeout,
-            $retryPolicy
-        );
+        $response = $platformService->executeEndpointCall($this->payload, $httpAdapter);
 
         if ($response['retryable'] && $this->attempts() < $this->tries) {
             $retryAfter = $this->extractRetryAfter($response);
@@ -130,6 +123,21 @@ class EndpointExecutionJob implements ShouldQueue
                 $this->buildNextEventPayload($response, $endpoint, $method)
             )->onQueue('events');
         }
+    }
+
+    private function resolvePlatformService(EventProcessingService $eventProcessingService): GenericPlatformService
+    {
+        $serviceClass = $eventProcessingService->getServiceClass($this->event->platform);
+
+        if (! is_string($serviceClass) || ! class_exists($serviceClass) || ! is_a($serviceClass, GenericPlatformService::class, true)) {
+            $serviceClass = GenericPlatformService::class;
+        }
+
+        return app()->make($serviceClass, [
+            'platform' => $this->event->platform,
+            'event' => $this->event,
+            'record' => $this->record,
+        ]);
     }
 
     private function buildNextEventPayload(array $response, string $endpoint, string $method): array

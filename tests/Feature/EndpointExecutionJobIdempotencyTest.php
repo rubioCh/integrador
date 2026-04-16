@@ -9,8 +9,8 @@ use App\Models\EventIdempotencyKey;
 use App\Models\Platform;
 use App\Models\Record;
 use App\Services\EventLoggingService;
+use App\Services\EventProcessingService;
 use App\Services\Generic\GenericHttpAdapter;
-use App\Services\Generic\GenericPlatformService;
 use App\Services\RateLimitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Mockery;
@@ -61,11 +61,7 @@ class EndpointExecutionJobIdempotencyTest extends TestCase
             'message' => 'init',
         ]);
 
-        $genericPlatformService = app()->make(GenericPlatformService::class, [
-            'platform' => $platform,
-            'event' => $event,
-            'record' => $record,
-        ]);
+        $eventProcessingService = app(EventProcessingService::class);
         $eventLoggingService = app(EventLoggingService::class);
         $rateLimitService = app(RateLimitService::class);
 
@@ -91,7 +87,7 @@ class EndpointExecutionJobIdempotencyTest extends TestCase
         $httpAdapter->shouldReceive('send')->once()->andReturn($response);
 
         $job = new EndpointExecutionJob($event, $record, ['payload' => ['id' => 1]]);
-        $job->handle($genericPlatformService, $httpAdapter, $eventLoggingService, $rateLimitService);
+        $job->handle($eventProcessingService, $httpAdapter, $eventLoggingService, $rateLimitService);
 
         $this->assertDatabaseCount('event_idempotency_keys', 1);
         $this->assertDatabaseHas('event_idempotency_keys', [
@@ -104,7 +100,7 @@ class EndpointExecutionJobIdempotencyTest extends TestCase
         $secondAdapter->shouldNotReceive('send');
 
         $secondJob = new EndpointExecutionJob($event, $record, ['payload' => ['id' => 1]]);
-        $secondJob->handle($genericPlatformService, $secondAdapter, $eventLoggingService, $rateLimitService);
+        $secondJob->handle($eventProcessingService, $secondAdapter, $eventLoggingService, $rateLimitService);
 
         $record->refresh();
         $idempotency = EventIdempotencyKey::query()->first();

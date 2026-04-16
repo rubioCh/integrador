@@ -5,6 +5,7 @@ namespace App\Providers;
 use RuntimeException;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as FoundationEventServiceProvider;
+use App\Services\Aspel\AspelService;
 use App\Services\Hubspot\HubspotService;
 use App\Services\Odoo\OdooService;
 use App\Services\NetSuite\NetSuiteService;
@@ -25,6 +26,12 @@ class AppServiceProvider extends ServiceProvider
                 'odoo' => OdooService::class,
                 'netsuite' => NetSuiteService::class,
                 'generic' => GenericPlatformService::class,
+            ];
+        });
+
+        $this->app->singleton('platformDriverClassList', function () {
+            return [
+                'aspel' => AspelService::class,
             ];
         });
     }

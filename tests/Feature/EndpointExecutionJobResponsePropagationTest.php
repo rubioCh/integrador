@@ -9,8 +9,8 @@ use App\Models\EventHttpConfig;
 use App\Models\Platform;
 use App\Models\Record;
 use App\Services\EventLoggingService;
+use App\Services\EventProcessingService;
 use App\Services\Generic\GenericHttpAdapter;
-use App\Services\Generic\GenericPlatformService;
 use App\Services\RateLimitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Queue;
@@ -105,11 +105,7 @@ class EndpointExecutionJobResponsePropagationTest extends TestCase
             ],
         ];
 
-        $genericPlatformService = app()->make(GenericPlatformService::class, [
-            'platform' => $targetPlatform,
-            'event' => $event,
-            'record' => $record,
-        ]);
+        $eventProcessingService = app(EventProcessingService::class);
         $eventLoggingService = app(EventLoggingService::class);
         $rateLimitService = app(RateLimitService::class);
 
@@ -117,7 +113,7 @@ class EndpointExecutionJobResponsePropagationTest extends TestCase
         $httpAdapter->shouldReceive('send')->once()->andReturn($response);
 
         $job = new EndpointExecutionJob($event->fresh('platform', 'to_event'), $record, $payload);
-        $job->handle($genericPlatformService, $httpAdapter, $eventLoggingService, $rateLimitService);
+        $job->handle($eventProcessingService, $httpAdapter, $eventLoggingService, $rateLimitService);
 
         Queue::assertPushed(ProcessNextEventJob::class, function (ProcessNextEventJob $job) use ($event, $record): bool {
             return $job->event->id === $event->id

@@ -8,8 +8,8 @@ use App\Models\EventHttpConfig;
 use App\Models\Platform;
 use App\Models\Record;
 use App\Services\EventLoggingService;
+use App\Services\EventProcessingService;
 use App\Services\Generic\GenericHttpAdapter;
-use App\Services\Generic\GenericPlatformService;
 use App\Services\Hubspot\HubspotApiServiceRefactored;
 use App\Services\RateLimitService;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -101,12 +101,6 @@ class EndpointExecutionJobHubspotFailureNoteTest extends TestCase
             ],
         ];
 
-        $genericPlatformService = app()->make(GenericPlatformService::class, [
-            'platform' => $genericPlatform,
-            'event' => $event,
-            'record' => $record,
-        ]);
-
         $httpAdapter = Mockery::mock(GenericHttpAdapter::class);
         $httpAdapter->shouldReceive('send')->once()->andReturn($response);
 
@@ -117,7 +111,7 @@ class EndpointExecutionJobHubspotFailureNoteTest extends TestCase
         ]);
 
         $job->handle(
-            $genericPlatformService,
+            app(EventProcessingService::class),
             $httpAdapter,
             app(EventLoggingService::class),
             app(RateLimitService::class),

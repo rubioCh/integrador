@@ -62,6 +62,8 @@ class HubspotContactResponseSyncTest extends TestCase
             'type' => 'webhook',
             'meta' => [
                 'object_type' => 'contacts',
+                'target_platform' => 'aspel',
+                'control_property' => 'sync_to_aspel',
                 'response_mapping_event_id' => $mappingEvent->id,
             ],
             'active' => true,
@@ -141,6 +143,10 @@ class HubspotContactResponseSyncTest extends TestCase
         $this->assertSame('401', $result['data']['contact_id']);
         $this->assertSame('Ana', $result['data']['updated_properties']['firstname']);
         $this->assertSame('ana@example.com', $result['data']['updated_properties']['email']);
+        $this->assertSame('synced', $result['data']['updated_properties']['sync_to_aspel']);
+        $this->assertSame('success', $result['data']['updated_properties']['sync_status_aspel']);
+        $this->assertArrayHasKey('last_sync_aspel', $result['data']['updated_properties']);
+        $this->assertSame('', $result['data']['updated_properties']['last_error_aspel']);
 
         Http::assertSent(function ($request): bool {
             if ($request->method() !== 'PATCH' || $request->url() !== 'https://api.hubapi.test/crm/v3/objects/contacts/401') {
@@ -150,7 +156,11 @@ class HubspotContactResponseSyncTest extends TestCase
             $properties = $request->data()['properties'] ?? [];
 
             return ($properties['firstname'] ?? null) === 'Ana'
-                && ($properties['email'] ?? null) === 'ana@example.com';
+                && ($properties['email'] ?? null) === 'ana@example.com'
+                && ($properties['sync_to_aspel'] ?? null) === 'synced'
+                && ($properties['sync_status_aspel'] ?? null) === 'success'
+                && array_key_exists('last_sync_aspel', $properties)
+                && ($properties['last_error_aspel'] ?? null) === '';
         });
     }
 }
