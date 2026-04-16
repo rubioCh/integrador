@@ -1,5 +1,6 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import IconAction from '@/Components/IconAction.vue';
 import PaginationNav from '@/Components/PaginationNav.vue';
 import { Link, router } from '@inertiajs/vue3';
 
@@ -46,10 +47,10 @@ const testConnection = (id) => router.post(`/admin/platforms/${id}/test-connecti
                         <td>{{ platform.type }}</td>
                         <td>{{ platform.active ? 'Sí' : 'No' }}</td>
                         <td>{{ platform.signature ?? '-' }}</td>
-                        <td>
-                            <button type="button" class="secondary compact" @click="testConnection(platform.id)">Test</button>
-                            <Link class="secondary compact" :href="`/admin/platforms/${platform.id}/edit`">Editar</Link>
-                            <button type="button" class="danger" @click="remove(platform.id)">Eliminar</button>
+                        <td class="actions-cell">
+                            <IconAction icon="test" label="Probar conexión" variant="success" @click="testConnection(platform.id)" />
+                            <IconAction as="link" icon="edit" label="Editar plataforma" :href="`/admin/platforms/${platform.id}/edit`" />
+                            <IconAction icon="delete" label="Eliminar plataforma" variant="danger" @click="remove(platform.id)" />
                         </td>
                     </tr>
                 </tbody>
@@ -66,6 +67,7 @@ const testConnection = (id) => router.post(`/admin/platforms/${id}/test-connecti
 table{width:100%;border-collapse:collapse}
 th,td{border-bottom:1px solid #e2e8f0;padding:10px 8px;text-align:left;font-size:13px}
 th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#475569}
+.actions-cell{white-space:nowrap}
 .primary,.secondary{border:1px solid #1d4ed8;background:#1d4ed8;color:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;text-decoration:none}
 .secondary{border-color:#cbd5e1;background:#f8fafc;color:#334155}
 .compact{margin-right:6px;padding:6px 8px}

@@ -21,6 +21,9 @@ class AdminPanelController extends Controller
     {
         $users = User::query()
             ->with('roles:id,name,slug')
+            ->whereDoesntHave('roles', static function ($query): void {
+                $query->where('slug', 'superadmin');
+            })
             ->orderBy('name')
             ->paginate(20)
             ->through(static function (User $user): array {
@@ -315,12 +318,38 @@ class AdminPanelController extends Controller
         ]);
     }
 
-    public function properties()
+    public function properties(Request $request)
     {
-        $properties = Property::query()
-            ->with('platform:id,name,slug,type')
+        $filters = [
+            'platform_id' => $request->string('platform_id')->toString(),
+            'type' => $request->string('type')->toString(),
+            'search' => $request->string('search')->toString(),
+        ];
+
+        $query = Property::query()
+            ->with('platform:id,name,slug,type');
+
+        if ($filters['platform_id'] !== '') {
+            $query->where('platform_id', (int) $filters['platform_id']);
+        }
+
+        if ($filters['type'] !== '') {
+            $query->where('type', $filters['type']);
+        }
+
+        if ($filters['search'] !== '') {
+            $search = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $filters['search']) . '%';
+
+            $query->where(static function ($query) use ($search): void {
+                $query->where('name', 'like', $search)
+                    ->orWhere('key', 'like', $search);
+            });
+        }
+
+        $properties = $query
             ->orderBy('name')
             ->paginate(20)
+            ->withQueryString()
             ->through(static function (Property $property): array {
                 return [
                     'id' => $property->id,
@@ -345,9 +374,23 @@ class AdminPanelController extends Controller
             ->orderBy('name')
             ->get(['id', 'name', 'slug', 'type']);
 
+        $defaultTypes = collect(['string', 'integer', 'float', 'boolean', 'datetime', 'file']);
+        $propertyTypes = Property::query()
+            ->whereNotNull('type')
+            ->distinct()
+            ->orderBy('type')
+            ->pluck('type')
+            ->merge($defaultTypes)
+            ->filter()
+            ->unique()
+            ->sort()
+            ->values();
+
         return inertia('Admin/Properties', [
             'properties' => $properties,
             'platforms' => $platforms,
+            'property_types' => $propertyTypes,
+            'filters' => $filters,
         ]);
     }
 

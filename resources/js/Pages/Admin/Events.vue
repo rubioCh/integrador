@@ -1,5 +1,6 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import IconAction from '@/Components/IconAction.vue';
 import PaginationNav from '@/Components/PaginationNav.vue';
 import { computed } from 'vue';
 import { Link, router } from '@inertiajs/vue3';
@@ -68,20 +69,19 @@ const executeNow = (id) => router.post(`/admin/events/${id}/execute-now`, {}, { 
                         <td>{{ event.platform?.name ?? 'n/a' }}</td>
                         <td>{{ event.to_event?.name ?? 'FIN' }}</td>
                         <td>{{ event.active ? 'Sí' : 'No' }}</td>
-                        <td>
-                            <Link class="secondary compact" :href="`/events/${event.id}`">Flow</Link>
-                            <Link class="secondary compact" :href="`/admin/events/${event.id}/triggers`">Triggers</Link>
-                            <Link class="secondary compact" :href="`/admin/events/${event.id}/relationships`">Mappings</Link>
-                            <Link class="secondary compact" :href="`/admin/events/${event.id}/edit`">Editar</Link>
-                            <button
+                        <td class="actions-cell">
+                            <IconAction as="link" icon="flow" label="Ver flujo" :href="`/events/${event.id}`" />
+                            <IconAction as="link" icon="trigger" label="Configurar triggers" :href="`/admin/events/${event.id}/triggers`" />
+                            <IconAction as="link" icon="mapping" label="Editar mappings" :href="`/admin/events/${event.id}/relationships`" />
+                            <IconAction as="link" icon="edit" label="Editar evento" :href="`/admin/events/${event.id}/edit`" />
+                            <IconAction
                                 v-if="event.type === 'schedule'"
-                                type="button"
-                                class="secondary compact"
+                                icon="play"
+                                label="Ejecutar ahora"
+                                variant="success"
                                 @click="executeNow(event.id)"
-                            >
-                                Execute now
-                            </button>
-                            <button type="button" class="danger" @click="remove(event.id)">Eliminar</button>
+                            />
+                            <IconAction icon="delete" label="Eliminar evento" variant="danger" @click="remove(event.id)" />
                         </td>
                     </tr>
                 </tbody>
@@ -98,6 +98,7 @@ const executeNow = (id) => router.post(`/admin/events/${id}/execute-now`, {}, { 
 table{width:100%;border-collapse:collapse}
 th,td{border-bottom:1px solid #e2e8f0;padding:10px 8px;text-align:left;font-size:13px}
 th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#475569}
+.actions-cell{white-space:nowrap}
 .flow-map{border:1px solid #dbe4ef;border-radius:12px;background:#fff;padding:12px;margin-bottom:12px}
 .flow-map h2{margin:0 0 10px;font-size:16px}
 .flow-lines{display:grid;gap:8px}

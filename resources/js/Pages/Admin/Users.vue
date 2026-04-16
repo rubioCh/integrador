@@ -1,5 +1,6 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import IconAction from '@/Components/IconAction.vue';
 import PaginationNav from '@/Components/PaginationNav.vue';
 import { Link, router } from '@inertiajs/vue3';
 
@@ -43,9 +44,9 @@ const remove = (id) => router.delete(`/admin/users/${id}`, { preserveScroll: tru
                         <td>{{ user.name }}</td>
                         <td>{{ user.email }}</td>
                         <td>{{ user.roles?.map((role) => role.slug).join(', ') || '-' }}</td>
-                        <td>
-                            <Link class="secondary compact" :href="`/admin/users/${user.id}/edit`">Editar</Link>
-                            <button type="button" class="danger" @click="remove(user.id)">Eliminar</button>
+                        <td class="actions-cell">
+                            <IconAction as="link" icon="edit" label="Editar usuario" :href="`/admin/users/${user.id}/edit`" />
+                            <IconAction icon="delete" label="Eliminar usuario" variant="danger" @click="remove(user.id)" />
                         </td>
                     </tr>
                 </tbody>
@@ -62,6 +63,7 @@ const remove = (id) => router.delete(`/admin/users/${id}`, { preserveScroll: tru
 table{width:100%;border-collapse:collapse}
 th,td{border-bottom:1px solid #e2e8f0;padding:10px 8px;text-align:left;font-size:13px}
 th{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:#475569}
+.actions-cell{white-space:nowrap}
 .primary,.secondary{border:1px solid #1d4ed8;background:#1d4ed8;color:#fff;border-radius:8px;padding:8px 12px;cursor:pointer;text-decoration:none}
 .secondary{border-color:#cbd5e1;background:#f8fafc;color:#334155}
 .compact{margin-right:6px;padding:6px 8px}

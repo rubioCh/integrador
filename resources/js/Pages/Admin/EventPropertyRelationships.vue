@@ -1,5 +1,6 @@
 <script setup>
 import AdminLayout from '@/Layouts/AdminLayout.vue';
+import IconAction from '@/Components/IconAction.vue';
 import { computed, ref } from 'vue';
 import { Link, router, useForm } from '@inertiajs/vue3';
 
@@ -168,8 +169,8 @@ const submit = () => {
                                     </span>
                                 </td>
                                 <td class="actions">
-                                    <button type="button" class="secondary compact" @click="startEdit(relationship)">Edit</button>
-                                    <button type="button" class="danger compact" @click="removeRelationship(relationship.id)">Delete</button>
+                                    <IconAction icon="edit" label="Editar mapping" @click="startEdit(relationship)" />
+                                    <IconAction icon="delete" label="Eliminar mapping" variant="danger" @click="removeRelationship(relationship.id)" />
                                 </td>
                             </tr>
                         </tbody>
