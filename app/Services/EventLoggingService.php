@@ -24,12 +24,14 @@ class EventLoggingService
         array $payload,
         string $message,
         ?int $parentRecordId = null,
-        ?int $eventId = null
+        ?int $eventId = null,
+        ?int $clientId = null
     ): Record {
         $this->assertStatusIsCanonical($status);
 
         return Record::query()->create([
             'event_id' => $eventId,
+            'client_id' => $clientId,
             'record_id' => $parentRecordId,
             'event_type' => $eventType,
             'status' => $status,

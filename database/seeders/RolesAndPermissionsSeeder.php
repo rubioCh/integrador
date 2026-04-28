@@ -12,9 +12,11 @@ class RolesAndPermissionsSeeder extends Seeder
     {
         $permissionSlugs = [
             'dashboard.view',
+            'records.view',
+            'clients.manage',
+            'integrations.manage',
             'events.view',
             'events.manage',
-            'records.view',
             'platforms.manage',
             'properties.manage',
             'configs.manage',
@@ -73,14 +75,14 @@ class RolesAndPermissionsSeeder extends Seeder
         $superAdminRole->permissions()->syncWithoutDetaching($permissionIds);
 
         $operatorPermissionIds = Permission::query()
-            ->whereIn('slug', ['dashboard.view', 'events.view', 'events.manage', 'records.view'])
+            ->whereIn('slug', ['dashboard.view', 'records.view'])
             ->pluck('id')
             ->all();
 
         $operatorRole->permissions()->sync($operatorPermissionIds);
 
         $viewerPermissionIds = Permission::query()
-            ->whereIn('slug', ['dashboard.view', 'events.view', 'records.view'])
+            ->whereIn('slug', ['dashboard.view', 'records.view'])
             ->pluck('id')
             ->all();
 

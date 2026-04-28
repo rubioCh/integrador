@@ -5,6 +5,7 @@ namespace App\Providers;
 use App\Events\Company\CreateCompanyEvent;
 use App\Events\Company\UpdateCompanyEvent;
 use App\Events\Generic\ExternalCallEvent;
+use App\Events\HubSpot\ContactPropertyChangedEvent;
 use App\Events\Invoice\CreateInvoiceEvent;
 use App\Events\Invoice\CreateRecurringInvoiceEvent;
 use App\Events\NextEvent;
@@ -19,6 +20,7 @@ use App\Events\SaleOrder\CreateSaleOrderEvent;
 use App\Listeners\Company\CreateCompanyListener;
 use App\Listeners\Company\UpdateCompanyListener;
 use App\Listeners\Generic\ExternalCallListener;
+use App\Listeners\HubSpot\ContactPropertyChangedListener;
 use App\Listeners\Invoice\CreateInvoiceListener;
 use App\Listeners\Invoice\CreateRecurringInvoiceListener;
 use App\Listeners\NextEventListener;
@@ -76,6 +78,9 @@ class EventServiceProvider extends ServiceProvider
         ],
         ExternalCallEvent::class => [
             ExternalCallListener::class,
+        ],
+        ContactPropertyChangedEvent::class => [
+            ContactPropertyChangedListener::class,
         ],
     ];
 

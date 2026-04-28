@@ -6,6 +6,10 @@ defineProps({
         type: Object,
         required: true,
     },
+    recent_clients: {
+        type: Array,
+        required: true,
+    },
 });
 </script>
 
@@ -13,25 +17,33 @@ defineProps({
     <AdminLayout title="Dashboard">
         <div class="dashboard-grid">
             <section class="hero-card">
-                <p class="kicker">Integration Control Center</p>
-                <h2>Panel de administración</h2>
+                <p class="kicker">Lite HubSpot -> Trebel</p>
+                <h2>Operación multi-cliente</h2>
                 <p>
-                    Estado general del sistema de integración, eventos configurados y trazabilidad operativa.
+                    Configura reglas por cliente, escucha cambios en HubSpot y despacha plantillas a Trebel con trazabilidad completa.
                 </p>
             </section>
 
             <section class="cards" aria-label="Resumen del sistema">
                 <article class="card">
-                    <span class="label">Eventos</span>
-                    <strong>{{ stats.events }}</strong>
+                    <span class="label">Clientes</span>
+                    <strong>{{ stats.clients }}</strong>
                 </article>
                 <article class="card">
-                    <span class="label">Eventos activos</span>
-                    <strong>{{ stats.active_events }}</strong>
+                    <span class="label">Clientes activos</span>
+                    <strong>{{ stats.active_clients }}</strong>
                 </article>
                 <article class="card">
-                    <span class="label">Plataformas</span>
-                    <strong>{{ stats.platforms }}</strong>
+                    <span class="label">Conexiones</span>
+                    <strong>{{ stats.connections }}</strong>
+                </article>
+                <article class="card">
+                    <span class="label">Plantillas</span>
+                    <strong>{{ stats.templates }}</strong>
+                </article>
+                <article class="card">
+                    <span class="label">Reglas</span>
+                    <strong>{{ stats.rules }}</strong>
                 </article>
                 <article class="card">
                     <span class="label">Records</span>
@@ -42,15 +54,30 @@ defineProps({
             <section class="quick-panel">
                 <div>
                     <p class="kicker">Accesos rápidos</p>
-                    <h3>Operación diaria</h3>
+                    <h3>Configuración central</h3>
                 </div>
 
                 <div class="shortcuts">
-                    <a href="/admin/events">Eventos</a>
-                    <a href="/admin/platforms">Plataformas</a>
-                    <a href="/admin/properties">Propiedades</a>
+                    <a href="/admin/clients">Clientes</a>
                     <a href="/admin/records">Records</a>
+                    <a href="/admin/users">Usuarios</a>
+                    <a href="/admin/roles">Roles</a>
                 </div>
+            </section>
+
+            <section class="client-list">
+                <article v-for="client in recent_clients" :key="client.id" class="client-item">
+                    <div>
+                        <strong>{{ client.name }}</strong>
+                        <p>{{ client.slug }}</p>
+                    </div>
+                    <div class="meta">
+                        <span>{{ client.platform_connections_count }} conexiones</span>
+                        <span>{{ client.trebel_templates_count }} plantillas</span>
+                        <span>{{ client.message_rules_count }} reglas</span>
+                    </div>
+                    <a :href="`/admin/clients/${client.id}/connections`">Abrir</a>
+                </article>
             </section>
         </div>
     </AdminLayout>
@@ -66,7 +93,7 @@ defineProps({
     position: relative;
     overflow: hidden;
     border: 1px solid rgba(51, 65, 85, 0.12);
-    border-radius: 22px;
+    border-radius: 8px;
     padding: 26px;
     background:
         radial-gradient(circle at 92% 18%, rgba(251, 191, 36, 0.42), transparent 28%),
@@ -107,7 +134,7 @@ defineProps({
 
 .card {
     border: 1px solid rgba(148, 163, 184, 0.3);
-    border-radius: 18px;
+    border-radius: 8px;
     padding: 18px;
     background: rgba(255, 255, 255, 0.9);
     box-shadow: 0 12px 26px rgba(15, 23, 42, 0.07);
@@ -131,7 +158,7 @@ defineProps({
     gap: 16px;
     align-items: center;
     border: 1px solid rgba(148, 163, 184, 0.28);
-    border-radius: 18px;
+    border-radius: 8px;
     padding: 18px;
     background: rgba(255, 255, 255, 0.88);
 }
@@ -145,12 +172,50 @@ defineProps({
 
 .shortcuts a {
     border: 1px solid #d6dee8;
-    border-radius: 999px;
+    border-radius: 8px;
     padding: 8px 12px;
     background: #fff;
     color: #334155;
     font-size: 13px;
     text-decoration: none;
+}
+
+.client-list {
+    display: grid;
+    gap: 12px;
+}
+
+.client-item {
+    display: grid;
+    grid-template-columns: minmax(160px, 2fr) minmax(220px, 2fr) auto;
+    gap: 12px;
+    align-items: center;
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    border-radius: 8px;
+    padding: 16px;
+    background: rgba(255, 255, 255, 0.88);
+}
+
+.client-item p {
+    margin: 4px 0 0;
+    color: #64748b;
+}
+
+.meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    color: #475569;
+    font-size: 13px;
+}
+
+.client-item a {
+    border: 1px solid #cbd5e1;
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: #334155;
+    text-decoration: none;
+    background: #fff;
 }
 
 .shortcuts a:hover {

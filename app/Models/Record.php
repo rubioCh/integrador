@@ -13,6 +13,7 @@ class Record extends Model
 
     protected $fillable = [
         'event_id',
+        'client_id',
         'record_id',
         'event_type',
         'status',
@@ -29,6 +30,11 @@ class Record extends Model
     public function event(): BelongsTo
     {
         return $this->belongsTo(Event::class);
+    }
+
+    public function client(): BelongsTo
+    {
+        return $this->belongsTo(Client::class);
     }
 
     public function parent(): BelongsTo
