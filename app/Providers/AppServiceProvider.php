@@ -6,6 +6,7 @@ use RuntimeException;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Foundation\Support\Providers\EventServiceProvider as FoundationEventServiceProvider;
 use App\Services\Aspel\AspelService;
+use App\Services\AzureSql\AzureSqlService;
 use App\Services\Hubspot\HubspotService;
 use App\Services\Odoo\OdooService;
 use App\Services\NetSuite\NetSuiteService;
@@ -32,6 +33,7 @@ class AppServiceProvider extends ServiceProvider
         $this->app->singleton('platformDriverClassList', function () {
             return [
                 'aspel' => AspelService::class,
+                'azure_sql' => AzureSqlService::class,
             ];
         });
     }

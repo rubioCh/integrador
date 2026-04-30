@@ -52,6 +52,41 @@ class HubspotApiServiceRefactored
         ]);
     }
 
+    public function searchObjectByProperty(string $objectType, string $propertyName, mixed $value, array $properties = []): array
+    {
+        $normalizedObjectType = $this->normalizeObjectType($objectType);
+        $normalizedPropertyName = trim($propertyName);
+
+        if ($normalizedPropertyName === '') {
+            return $this->errorResponse(0, 'HubSpot property name is required for search.');
+        }
+
+        if (! is_scalar($value) || trim((string) $value) === '') {
+            return $this->errorResponse(0, 'HubSpot property value is required for search.');
+        }
+
+        $requestedProperties = array_values(array_unique(array_filter(array_map(
+            static fn (mixed $property): string => is_scalar($property) ? trim((string) $property) : '',
+            $properties
+        ))));
+
+        if (! in_array($normalizedPropertyName, $requestedProperties, true)) {
+            $requestedProperties[] = $normalizedPropertyName;
+        }
+
+        return $this->request('POST', '/crm/v3/objects/' . $normalizedObjectType . '/search', [
+            'filterGroups' => [[
+                'filters' => [[
+                    'propertyName' => $normalizedPropertyName,
+                    'operator' => 'EQ',
+                    'value' => trim((string) $value),
+                ]],
+            ]],
+            'properties' => $requestedProperties,
+            'limit' => 2,
+        ]);
+    }
+
     public function createInvoice(array $payload): array
     {
         return $this->request('POST', '/crm/v3/objects/invoices', [

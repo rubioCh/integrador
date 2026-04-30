@@ -29,6 +29,27 @@ class EventLoggingServiceTest extends TestCase
         ]);
     }
 
+    public function test_it_can_create_a_record_with_details(): void
+    {
+        $service = app(EventLoggingService::class);
+
+        $record = $service->createEventRecord(
+            eventType: 'azure_sql.products.sync',
+            status: 'error',
+            payload: ['event_id' => 10],
+            message: 'Invalid method name for scheduled event.',
+            details: [
+                'reason' => 'missing_method_name',
+                'queue' => 'events',
+            ],
+        );
+
+        $record->refresh();
+
+        $this->assertSame('missing_method_name', $record->details['reason'] ?? null);
+        $this->assertSame('events', $record->details['queue'] ?? null);
+    }
+
     public function test_it_logs_success_status(): void
     {
         $service = app(EventLoggingService::class);

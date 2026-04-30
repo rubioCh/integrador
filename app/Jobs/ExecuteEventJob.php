@@ -12,7 +12,6 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
 class ExecuteEventJob implements ShouldQueue
@@ -39,7 +38,14 @@ class ExecuteEventJob implements ShouldQueue
                 $this->event->toArray(),
                 'Invalid method name for scheduled event.',
                 null,
-                $this->event->id
+                $this->event->id,
+                [
+                    'reason' => 'missing_method_name',
+                    'event_id' => $this->event->id,
+                    'event_type_id' => $this->event->event_type_id,
+                    'platform_id' => $this->event->platform_id,
+                    'queue' => 'events',
+                ]
             );
             return;
         }
@@ -75,6 +81,16 @@ class ExecuteEventJob implements ShouldQueue
                 'record' => $record,
             ]);
             $result = $this->invokeServiceMethod($service, $methodName, $payload, $record);
+
+            if (Arr::get($result, 'status') === 'warning') {
+                $eventLoggingService->logEventWarning(
+                    $record,
+                    Arr::get($result, 'message', 'Scheduled event finished with warnings.'),
+                    Arr::get($result, 'data', [])
+                );
+                $this->event->update(['last_executed_at' => now()]);
+                return;
+            }
 
             if (! Arr::get($result, 'success', false)) {
                 $eventLoggingService->logEventError($record, new \Exception(Arr::get($result, 'message', 'Scheduled event failed')));
@@ -132,7 +148,6 @@ class ExecuteEventJob implements ShouldQueue
 
         if ($this->event->command_sql) {
             $payload['command_sql'] = $this->event->command_sql;
-            $payload['command_results'] = DB::select(DB::raw($this->event->command_sql));
         }
 
         if ($this->event->enable_update_hubdb) {

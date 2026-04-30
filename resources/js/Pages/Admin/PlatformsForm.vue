@@ -12,6 +12,7 @@ const isEdit = computed(() => props.mode === 'edit');
 
 const credentials = props.platform?.credentials ?? {};
 const settings = props.platform?.settings ?? {};
+const genericServiceDriver = settings.service_driver ?? credentials.service_driver ?? '';
 
 const form = useForm({
     name: props.platform?.name ?? '',
@@ -32,6 +33,7 @@ const form = useForm({
     netsuite_token_secret: credentials.token_secret ?? '',
     netsuite_private_key: credentials.private_key ?? '',
 
+    generic_service_driver: genericServiceDriver,
     generic_auth_mode: settings.auth_mode ?? '',
     generic_api_key: credentials.api_key ?? '',
     generic_basic_user: credentials.username ?? credentials.basic_user ?? '',
@@ -39,6 +41,15 @@ const form = useForm({
     generic_oauth_client_id: credentials.client_id ?? credentials.oauth_client_id ?? '',
     generic_oauth_client_secret: credentials.client_secret ?? credentials.oauth_client_secret ?? '',
     generic_oauth_token_url: settings.token_url ?? settings.oauth_token_url ?? '',
+    azure_sql_connection_string: '',
+    azure_sql_host: settings.host ?? credentials.host ?? '',
+    azure_sql_port: settings.port ?? credentials.port ?? '1433',
+    azure_sql_database: settings.database ?? credentials.database ?? '',
+    azure_sql_username: credentials.username ?? '',
+    azure_sql_password: credentials.password ?? '',
+    azure_sql_encrypt: settings.encrypt ?? true,
+    azure_sql_trust_server_certificate: settings.trust_server_certificate ?? false,
+    azure_sql_login_timeout: settings.login_timeout ?? 30,
 
     signature: props.platform?.signature ?? '',
     secret_key: props.platform?.secret_key ?? '',
@@ -69,17 +80,23 @@ const requiredFields = computed(() => {
     }
 
     if (form.type === 'generic') {
-        required.push('api_url');
+        required.push('generic_service_driver');
 
-        if (form.generic_auth_mode === 'bearer_api_key') {
+        if (form.generic_service_driver === 'azure_sql') {
+            required.push('azure_sql_host', 'azure_sql_database', 'azure_sql_username', 'azure_sql_password');
+        } else {
+            required.push('api_url');
+        }
+
+        if (form.generic_service_driver !== 'azure_sql' && form.generic_auth_mode === 'bearer_api_key') {
             required.push('generic_api_key');
         }
 
-        if (form.generic_auth_mode === 'basic_auth') {
+        if (form.generic_service_driver !== 'azure_sql' && form.generic_auth_mode === 'basic_auth') {
             required.push('generic_basic_user', 'generic_basic_password');
         }
 
-        if (form.generic_auth_mode === 'oauth2_client_credentials') {
+        if (form.generic_service_driver !== 'azure_sql' && form.generic_auth_mode === 'oauth2_client_credentials') {
             required.push('generic_oauth_client_id', 'generic_oauth_client_secret', 'generic_oauth_token_url');
         }
     }
@@ -90,6 +107,7 @@ const requiredFields = computed(() => {
 const isGenericBearer = computed(() => form.type === 'generic' && form.generic_auth_mode === 'bearer_api_key');
 const isGenericBasic = computed(() => form.type === 'generic' && form.generic_auth_mode === 'basic_auth');
 const isGenericOAuth = computed(() => form.type === 'generic' && form.generic_auth_mode === 'oauth2_client_credentials');
+const isAzureSqlDriver = computed(() => form.type === 'generic' && form.generic_service_driver === 'azure_sql');
 
 const missingRequiredCount = computed(() => requiredFields.value
     .filter((field) => {
@@ -105,6 +123,104 @@ const compactObject = (obj) => Object.fromEntries(Object.entries(obj)
         if (typeof value === 'string') return value.trim() !== '';
         return true;
     }));
+
+const parseBooleanString = (value) => {
+    if (typeof value !== 'string') {
+        return null;
+    }
+
+    const normalized = value.trim().toLowerCase();
+
+    if (['true', '1', 'yes'].includes(normalized)) {
+        return true;
+    }
+
+    if (['false', '0', 'no'].includes(normalized)) {
+        return false;
+    }
+
+    return null;
+};
+
+const splitConnectionSegment = (segment) => {
+    const separatorIndex = segment.indexOf('=');
+
+    if (separatorIndex === -1) {
+        return null;
+    }
+
+    const key = segment.slice(0, separatorIndex).trim();
+    const value = segment.slice(separatorIndex + 1).trim();
+
+    if (!key) {
+        return null;
+    }
+
+    return [key, value];
+};
+
+const parseAzureSqlConnectionString = () => {
+    const raw = String(form.azure_sql_connection_string || '').trim();
+
+    if (!raw) {
+        return;
+    }
+
+    const entries = raw
+        .split(';')
+        .map((segment) => segment.trim())
+        .filter(Boolean)
+        .map(splitConnectionSegment)
+        .filter(Boolean);
+
+    const values = Object.fromEntries(entries.map(([key, value]) => [key.toLowerCase(), value]));
+
+    const dataSource = values['data source'] ?? values.server ?? values.address ?? values.addr ?? values['network address'];
+    const database = values['initial catalog'] ?? values.database;
+    const username = values['user id'] ?? values.uid ?? values.username;
+    const password = values.password ?? values.pwd;
+    const loginTimeout = values['connect timeout'] ?? values['login timeout'];
+    const encrypt = values.encrypt;
+    const trustServerCertificate = values['trust server certificate'];
+
+    if (database) {
+        form.azure_sql_database = database;
+    }
+
+    if (username) {
+        form.azure_sql_username = username;
+    }
+
+    if (password) {
+        form.azure_sql_password = password;
+    }
+
+    if (loginTimeout && !Number.isNaN(Number(loginTimeout))) {
+        form.azure_sql_login_timeout = Number(loginTimeout);
+    }
+
+    const parsedEncrypt = parseBooleanString(encrypt);
+    if (parsedEncrypt !== null) {
+        form.azure_sql_encrypt = parsedEncrypt;
+    }
+
+    const parsedTrustServerCertificate = parseBooleanString(trustServerCertificate);
+    if (parsedTrustServerCertificate !== null) {
+        form.azure_sql_trust_server_certificate = parsedTrustServerCertificate;
+    }
+
+    if (dataSource) {
+        const normalizedDataSource = dataSource.replace(/^tcp:/i, '').trim();
+        const lastCommaIndex = normalizedDataSource.lastIndexOf(',');
+
+        if (lastCommaIndex !== -1) {
+            form.azure_sql_host = normalizedDataSource.slice(0, lastCommaIndex).trim();
+            form.azure_sql_port = normalizedDataSource.slice(lastCommaIndex + 1).trim();
+        } else {
+            form.azure_sql_host = normalizedDataSource;
+        }
+    }
+};
 
 const buildCredentials = () => {
     if (form.type === 'hubspot') {
@@ -129,6 +245,14 @@ const buildCredentials = () => {
             token_id: form.netsuite_token_id,
             token_secret: form.netsuite_token_secret,
             private_key: form.netsuite_private_key,
+        });
+    }
+
+    if (form.type === 'generic' && form.generic_service_driver === 'azure_sql') {
+        return compactObject({
+            service_driver: 'azure_sql',
+            username: form.azure_sql_username,
+            password: form.azure_sql_password,
         });
     }
 
@@ -173,8 +297,15 @@ const buildSettings = () => {
         return {
             ...common,
             ...compactObject({
+                service_driver: form.generic_service_driver,
                 auth_mode: form.generic_auth_mode,
                 token_url: form.generic_oauth_token_url,
+                host: form.azure_sql_host,
+                port: form.azure_sql_port,
+                database: form.azure_sql_database,
+                encrypt: form.generic_service_driver === 'azure_sql' ? !!form.azure_sql_encrypt : null,
+                trust_server_certificate: form.generic_service_driver === 'azure_sql' ? !!form.azure_sql_trust_server_certificate : null,
+                login_timeout: form.generic_service_driver === 'azure_sql' ? Number(form.azure_sql_login_timeout || 30) : null,
             }),
         };
     }
@@ -335,35 +466,94 @@ const submit = () => {
                 </header>
                 <div class="grid two">
                     <label>
+                        <span>Service Driver</span>
+                        <select v-model="form.generic_service_driver">
+                            <option value="">Select service driver</option>
+                            <option value="azure_sql">azure_sql</option>
+                            <option value="aspel">aspel</option>
+                            <option value="generic_http">generic_http</option>
+                        </select>
+                    </label>
+                    <label>
                         <span>Auth Mode</span>
-                        <select v-model="form.generic_auth_mode">
+                        <select v-model="form.generic_auth_mode" :disabled="isAzureSqlDriver">
                             <option value="">Select auth mode</option>
                             <option value="bearer_api_key">bearer_api_key</option>
                             <option value="basic_auth">basic_auth</option>
                             <option value="oauth2_client_credentials">oauth2_client_credentials</option>
                         </select>
                     </label>
-                    <label v-if="isGenericBearer">
+                    <div v-if="isAzureSqlDriver" class="field-group full">
+                        <label>
+                            <span>Connection String</span>
+                            <textarea
+                                v-model="form.azure_sql_connection_string"
+                                rows="3"
+                                placeholder="Data Source=tcp:sql-crm-maco.database.windows.net,1433;Initial Catalog=DB-CRM;User ID=sqladmin;Password=...;Encrypt=True;Trust Server Certificate=False;Connect Timeout=30;"
+                            />
+                        </label>
+                        <div class="inline-actions">
+                            <button type="button" class="secondary small" @click="parseAzureSqlConnectionString">
+                                Parse connection string
+                            </button>
+                            <p class="helper">
+                                Pega la cadena completa y convertimos sus valores a los campos de abajo. No guardamos la cadena cruda.
+                            </p>
+                        </div>
+                    </div>
+                    <label v-if="isAzureSqlDriver">
+                        <span>SQL Host</span>
+                        <input v-model="form.azure_sql_host" type="text" placeholder="sql-crm-maco.database.windows.net">
+                    </label>
+                    <label v-if="isAzureSqlDriver">
+                        <span>SQL Port</span>
+                        <input v-model="form.azure_sql_port" type="text" placeholder="1433">
+                    </label>
+                    <label v-if="isAzureSqlDriver">
+                        <span>Database</span>
+                        <input v-model="form.azure_sql_database" type="text" placeholder="DB-CRM">
+                    </label>
+                    <label v-if="isAzureSqlDriver">
+                        <span>Username</span>
+                        <input v-model="form.azure_sql_username" type="text" placeholder="sqladmin">
+                    </label>
+                    <label v-if="isAzureSqlDriver">
+                        <span>Password</span>
+                        <input v-model="form.azure_sql_password" type="password" placeholder="Enter SQL password">
+                    </label>
+                    <label v-if="isAzureSqlDriver">
+                        <span>Login Timeout</span>
+                        <input v-model="form.azure_sql_login_timeout" type="number" min="1" placeholder="30">
+                    </label>
+                    <label v-if="isAzureSqlDriver" class="check">
+                        <input v-model="form.azure_sql_encrypt" type="checkbox">
+                        <span>Encrypt connection</span>
+                    </label>
+                    <label v-if="isAzureSqlDriver" class="check">
+                        <input v-model="form.azure_sql_trust_server_certificate" type="checkbox">
+                        <span>Trust server certificate</span>
+                    </label>
+                    <label v-if="isGenericBearer && !isAzureSqlDriver">
                         <span>API Key</span>
                         <input v-model="form.generic_api_key" type="text" placeholder="Enter API key">
                     </label>
-                    <label v-if="isGenericBasic">
+                    <label v-if="isGenericBasic && !isAzureSqlDriver">
                         <span>Basic User</span>
                         <input v-model="form.generic_basic_user" type="text" placeholder="Enter basic user">
                     </label>
-                    <label v-if="isGenericBasic">
+                    <label v-if="isGenericBasic && !isAzureSqlDriver">
                         <span>Basic Password</span>
                         <input v-model="form.generic_basic_password" type="password" placeholder="Enter basic password">
                     </label>
-                    <label v-if="isGenericOAuth">
+                    <label v-if="isGenericOAuth && !isAzureSqlDriver">
                         <span>OAuth Client ID</span>
                         <input v-model="form.generic_oauth_client_id" type="text" placeholder="Enter OAuth client ID">
                     </label>
-                    <label v-if="isGenericOAuth">
+                    <label v-if="isGenericOAuth && !isAzureSqlDriver">
                         <span>OAuth Client Secret</span>
                         <input v-model="form.generic_oauth_client_secret" type="password" placeholder="Enter OAuth client secret">
                     </label>
-                    <label v-if="isGenericOAuth">
+                    <label v-if="isGenericOAuth && !isAzureSqlDriver">
                         <span>OAuth Token URL</span>
                         <input v-model="form.generic_oauth_token_url" type="url" placeholder="https://oauth.example.com/token">
                     </label>
@@ -386,7 +576,7 @@ const submit = () => {
                     </label>
                     <label class="full">
                         <span>API URL</span>
-                        <input v-model="form.api_url" type="url" placeholder="https://api.example.com">
+                        <input v-model="form.api_url" type="url" placeholder="https://api.example.com" :disabled="isAzureSqlDriver">
                     </label>
                     <label class="check full">
                         <input v-model="form.active" type="checkbox">
@@ -433,6 +623,24 @@ const submit = () => {
 .warning{
     color:#f97316;
     font-size:13px;
+}
+
+.field-group{
+    display:grid;
+    gap:8px;
+}
+
+.inline-actions{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+}
+
+.helper{
+    margin:0;
+    color:#64748b;
+    font-size:12px;
 }
 
 .block{

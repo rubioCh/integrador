@@ -21,6 +21,9 @@ enum EventType: string
     case HUBSPOT_PROPERTY_CHANGED_LEGACY = 'hubspot.property.changed';
     case ODOO_GET_LIST_PRICES = 'odoo.get_list_prices';
     case ODOO_GET_STORE_PRODUCTS = 'odoo.get_store_products';
+    case AZURE_SQL_PRODUCTS_SYNC = 'azure_sql.products.sync';
+    case AZURE_SQL_ACCOUNTS_SYNC = 'azure_sql.accounts.sync';
+    case AZURE_SQL_CONTACTS_SYNC = 'azure_sql.contacts.sync';
     case NEXT_EVENT = 'next.event';
     case GENERIC_EXTERNAL_CALL = 'generic.external.call';
 
@@ -44,6 +47,9 @@ enum EventType: string
             self::HUBSPOT_PROPERTY_CHANGED_LEGACY => 'HubSpot Property Changed (Legacy)',
             self::ODOO_GET_LIST_PRICES => 'Odoo Get List Prices',
             self::ODOO_GET_STORE_PRODUCTS => 'Odoo Get Store Products',
+            self::AZURE_SQL_PRODUCTS_SYNC => 'Azure SQL Products Sync',
+            self::AZURE_SQL_ACCOUNTS_SYNC => 'Azure SQL Accounts Sync',
+            self::AZURE_SQL_CONTACTS_SYNC => 'Azure SQL Contacts Sync',
             self::NEXT_EVENT => 'Next Event',
             self::GENERIC_EXTERNAL_CALL => 'Generic External Call',
         };
@@ -69,6 +75,9 @@ enum EventType: string
             self::HUBSPOT_PROPERTY_CHANGED_LEGACY => 'Legacy alias kept for compatibility with previous configurations.',
             self::ODOO_GET_LIST_PRICES => 'Fetches Odoo price list data for products or variants.',
             self::ODOO_GET_STORE_PRODUCTS => 'Fetches store products from Odoo catalogs.',
+            self::AZURE_SQL_PRODUCTS_SYNC => 'Reads product rows from Azure SQL and updates existing HubSpot products.',
+            self::AZURE_SQL_ACCOUNTS_SYNC => 'Reads customer/account rows from Azure SQL and updates existing HubSpot companies.',
+            self::AZURE_SQL_CONTACTS_SYNC => 'Reads contact locator rows from Azure SQL and reconciles existing HubSpot contacts.',
             self::NEXT_EVENT => 'Internal flow-control event used to continue a pipeline.',
             self::GENERIC_EXTERNAL_CALL => 'Executes an HTTP call for a generic platform without an SDK.',
         };
@@ -84,6 +93,9 @@ enum EventType: string
             self::HUBSPOT_PROPERTY_CHANGED_LEGACY => 'Legacy',
             self::ODOO_GET_LIST_PRICES,
             self::ODOO_GET_STORE_PRODUCTS => 'Odoo Sync',
+            self::AZURE_SQL_PRODUCTS_SYNC,
+            self::AZURE_SQL_ACCOUNTS_SYNC,
+            self::AZURE_SQL_CONTACTS_SYNC => 'Azure SQL Sync',
             self::GENERIC_EXTERNAL_CALL => 'Generic HTTP',
             self::NEXT_EVENT => 'Flow Control',
             default => 'Core Events',
@@ -103,6 +115,9 @@ enum EventType: string
             self::HUBSPOT_PROPERTY_CHANGED_LEGACY => ['hubspot'],
             self::ODOO_GET_LIST_PRICES,
             self::ODOO_GET_STORE_PRODUCTS => ['odoo'],
+            self::AZURE_SQL_PRODUCTS_SYNC,
+            self::AZURE_SQL_ACCOUNTS_SYNC,
+            self::AZURE_SQL_CONTACTS_SYNC => ['generic'],
             self::GENERIC_EXTERNAL_CALL => ['generic'],
             default => ['*'],
         };
@@ -139,6 +154,9 @@ enum EventType: string
             self::HUBSPOT_PROPERTY_CHANGED_LEGACY => \App\Events\Object\UpdateObjectEvent::class,
             self::ODOO_GET_LIST_PRICES => \App\Events\Odoo\GetListPricesEvent::class,
             self::ODOO_GET_STORE_PRODUCTS => \App\Events\Odoo\GetStoreProductsEvent::class,
+            self::AZURE_SQL_PRODUCTS_SYNC => \App\Events\Object\UpdateObjectEvent::class,
+            self::AZURE_SQL_ACCOUNTS_SYNC => \App\Events\Object\UpdateObjectEvent::class,
+            self::AZURE_SQL_CONTACTS_SYNC => \App\Events\Object\UpdateObjectEvent::class,
             self::NEXT_EVENT => \App\Events\NextEvent::class,
             self::GENERIC_EXTERNAL_CALL => \App\Events\Generic\ExternalCallEvent::class,
         };

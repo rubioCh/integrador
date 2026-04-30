@@ -24,7 +24,8 @@ class EventLoggingService
         array $payload,
         string $message,
         ?int $parentRecordId = null,
-        ?int $eventId = null
+        ?int $eventId = null,
+        ?array $details = null
     ): Record {
         $this->assertStatusIsCanonical($status);
 
@@ -35,6 +36,7 @@ class EventLoggingService
             'status' => $status,
             'payload' => $payload,
             'message' => $message,
+            'details' => $details,
         ]);
     }
 
