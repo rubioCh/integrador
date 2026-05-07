@@ -17,7 +17,7 @@ class MessageRuleManagementController extends Controller
 
         MessageRule::query()->create([
             'client_id' => $client->id,
-            'trebel_template_id' => $data['trebel_template_id'],
+            'treble_template_id' => $data['treble_template_id'],
             'name' => $data['name'],
             'priority' => (int) ($data['priority'] ?? 100),
             'trigger_property' => $data['trigger_property'],
@@ -35,7 +35,7 @@ class MessageRuleManagementController extends Controller
         $data = $this->validatePayload($request, $client);
 
         $rule->update([
-            'trebel_template_id' => $data['trebel_template_id'],
+            'treble_template_id' => $data['treble_template_id'],
             'name' => $data['name'],
             'priority' => (int) ($data['priority'] ?? 100),
             'trigger_property' => $data['trigger_property'],
@@ -58,9 +58,9 @@ class MessageRuleManagementController extends Controller
     private function validatePayload(Request $request, Client $client): array
     {
         return $request->validate([
-            'trebel_template_id' => [
+            'treble_template_id' => [
                 'required',
-                Rule::exists('trebel_templates', 'id')->where(fn ($query) => $query->where('client_id', $client->id)),
+                Rule::exists('treble_templates', 'id')->where(fn ($query) => $query->where('client_id', $client->id)),
             ],
             'name' => ['required', 'string', 'max:255'],
             'priority' => ['nullable', 'integer'],

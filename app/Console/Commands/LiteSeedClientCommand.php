@@ -16,13 +16,13 @@ class LiteSeedClientCommand extends Command
         {--hubspot-secret= : HubSpot webhook secret}
         {--hubspot-base-url=https://api.hubapi.com : HubSpot base URL}
         {--hubspot-signature=x-signature : HubSpot signature header}
-        {--trebel-base-url= : Trebel base URL}
-        {--trebel-send-path=/messages/send : Trebel send path}
-        {--trebel-auth-mode=bearer_api_key : Trebel auth mode}
-        {--trebel-api-key= : Trebel API key}
-        {--inactive-trebel : Create Trebel connection as inactive}';
+        {--treble-base-url= : Treble base URL}
+        {--treble-send-path=/messages/send : Treble send path}
+        {--treble-auth-mode=authorization_header : Treble auth mode}
+        {--treble-api-key= : Treble API key}
+        {--inactive-treble : Create Treble connection as inactive}';
 
-    protected $description = 'Create or update a Lite client with HubSpot and optional Trebel connections';
+    protected $description = 'Create or update a Lite client with HubSpot and optional Treble connections';
 
     public function handle(): int
     {
@@ -71,27 +71,27 @@ class LiteSeedClientCommand extends Command
         ]);
         $hubspot->save();
 
-        $trebel = PlatformConnection::query()->firstOrNew([
+        $treble = PlatformConnection::query()->firstOrNew([
             'client_id' => $client->id,
-            'platform_type' => 'trebel',
-            'slug' => 'trebel',
+            'platform_type' => 'treble',
+            'slug' => 'treble',
         ]);
 
-        $trebelCredentials = $trebel->credentials ?? [];
-        if ($this->filledOption('trebel-api-key')) {
-            $trebelCredentials['api_key'] = (string) $this->option('trebel-api-key');
+        $trebleCredentials = $treble->credentials ?? [];
+        if ($this->filledOption('treble-api-key')) {
+            $trebleCredentials['api_key'] = (string) $this->option('treble-api-key');
         }
 
-        $trebel->fill([
-            'name' => 'Trebel',
-            'base_url' => $this->filledOption('trebel-base-url')
-                ? (string) $this->option('trebel-base-url')
-                : ($trebel->base_url ?: null),
-            'credentials' => $trebelCredentials,
-            'settings' => array_merge($trebel->settings ?? [], [
-                'send_path' => (string) $this->option('trebel-send-path'),
+        $treble->fill([
+            'name' => 'Treble',
+            'base_url' => $this->filledOption('treble-base-url')
+                ? (string) $this->option('treble-base-url')
+                : ($treble->base_url ?: null),
+            'credentials' => $trebleCredentials,
+            'settings' => array_merge($treble->settings ?? [], [
+                'send_path' => (string) $this->option('treble-send-path'),
                 'http_method' => 'POST',
-                'auth_mode' => (string) $this->option('trebel-auth-mode'),
+                'auth_mode' => (string) $this->option('treble-auth-mode'),
                 'api_key_header' => 'X-API-Key',
                 'timeout_seconds' => 20,
                 'headers' => [],
@@ -104,13 +104,13 @@ class LiteSeedClientCommand extends Command
                     'school_level' => '{{contact.nivel_escolar_de_interes}}',
                 ],
             ]),
-            'active' => ! (bool) $this->option('inactive-trebel'),
+            'active' => ! (bool) $this->option('inactive-treble'),
         ]);
-        $trebel->save();
+        $treble->save();
 
         $this->info("Client [{$client->slug}] is ready.");
         $this->line("HubSpot connection id: {$hubspot->id}");
-        $this->line("Trebel connection id: {$trebel->id}");
+        $this->line("Treble connection id: {$treble->id}");
 
         return self::SUCCESS;
     }

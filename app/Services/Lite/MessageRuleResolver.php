@@ -9,7 +9,7 @@ class MessageRuleResolver
     public function resolve(int $clientId, array $contactProperties, string $triggerProperty, mixed $triggerValue): ?MessageRule
     {
         $rules = MessageRule::query()
-            ->with('trebelTemplate')
+            ->with('trebleTemplate')
             ->where('client_id', $clientId)
             ->where('active', true)
             ->where('trigger_property', $triggerProperty)

@@ -16,7 +16,7 @@ const destroyClient = (client) => {
 <template>
     <AdminLayout title="Clients">
         <div class="page-head">
-            <p>Clientes operando el flujo Lite HubSpot -> Trebel.</p>
+            <p>Clientes operando el flujo Lite HubSpot -> Treble.</p>
             <Link class="primary" href="/admin/clients/create">Nuevo cliente</Link>
         </div>
 
@@ -36,7 +36,7 @@ const destroyClient = (client) => {
                     <p>{{ client.slug }}</p>
                 </div>
                 <span>{{ client.platform_connections_count }}</span>
-                <span>{{ client.trebel_templates_count }}</span>
+                <span>{{ client.treble_templates_count }}</span>
                 <span>{{ client.message_rules_count }}</span>
                 <span :class="client.active ? 'ok' : 'off'">{{ client.active ? 'Activo' : 'Inactivo' }}</span>
                 <div class="actions">

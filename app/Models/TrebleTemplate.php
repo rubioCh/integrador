@@ -7,24 +7,23 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-class Record extends Model
+class TrebleTemplate extends Model
 {
     use HasFactory;
 
+    protected $table = 'treble_templates';
+
     protected $fillable = [
-        'event_id',
         'client_id',
-        'record_id',
-        'event_type',
-        'status',
-        'payload',
-        'message',
-        'details',
+        'name',
+        'external_template_id',
+        'payload_mapping',
+        'active',
     ];
 
     protected $casts = [
-        'payload' => 'array',
-        'details' => 'array',
+        'payload_mapping' => 'array',
+        'active' => 'boolean',
     ];
 
     public function client(): BelongsTo
@@ -32,13 +31,8 @@ class Record extends Model
         return $this->belongsTo(Client::class);
     }
 
-    public function parent(): BelongsTo
+    public function messageRules(): HasMany
     {
-        return $this->belongsTo(self::class, 'record_id');
-    }
-
-    public function childrens(): HasMany
-    {
-        return $this->hasMany(self::class, 'record_id');
+        return $this->hasMany(MessageRule::class);
     }
 }

@@ -9,7 +9,7 @@ use App\Services\EventLoggingService;
 use App\Services\Hubspot\HubspotContactSnapshotService;
 use App\Services\Lite\ClientPlatformConfigResolver;
 use App\Services\Lite\MessageRuleResolver;
-use App\Services\Trebel\TrebelService;
+use App\Services\Treble\TrebleService;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -37,7 +37,7 @@ class ProcessContactPropertyChangeJob implements ShouldQueue
         HubspotContactSnapshotService $hubspotContactSnapshotService,
         MessageRuleResolver $messageRuleResolver,
         ClientPlatformConfigResolver $configResolver,
-        TrebelService $trebelService
+        TrebleService $trebleService
     ): void {
         $record = $eventLoggingService->createEventRecord(
             'contact.propertyChange',
@@ -93,7 +93,7 @@ class ProcessContactPropertyChangeJob implements ShouldQueue
         $contactProperties = $contact['properties'] ?? [];
         $rule = $messageRuleResolver->resolve($this->client->id, $contactProperties, $triggerProperty, $triggerValue);
 
-        if (! $rule || ! $rule->trebelTemplate || ! $rule->trebelTemplate->active) {
+        if (! $rule || ! $rule->trebleTemplate || ! $rule->trebleTemplate->active) {
             $eventLoggingService->logEventWarning($record, 'No active message rule matched this contact.', [
                 'client_id' => $this->client->id,
                 'hubspot_object_id' => $hubspotObjectId,
@@ -105,15 +105,15 @@ class ProcessContactPropertyChangeJob implements ShouldQueue
         }
 
         try {
-            $trebelConnection = $configResolver->forClientAndPlatform($this->client->id, 'trebel');
-            $trebelResponse = $trebelService->sendTemplate($trebelConnection, $rule->trebelTemplate, $contactProperties, [
+            $trebleConnection = $configResolver->forClientAndPlatform($this->client->id, 'treble');
+            $trebleResponse = $trebleService->sendTemplate($trebleConnection, $rule->trebleTemplate, $contactProperties, [
                 'hubspot_object_id' => $hubspotObjectId,
                 'trigger_property' => $triggerProperty,
                 'trigger_value' => $triggerValue,
                 'contact' => $contact,
             ]);
         } catch (Throwable $exception) {
-            $trebelResponse = [
+            $trebleResponse = [
                 'success' => false,
                 'status_code' => 0,
                 'retryable' => false,
@@ -135,16 +135,21 @@ class ProcessContactPropertyChangeJob implements ShouldQueue
             'trigger_value' => $triggerValue,
             'matched_rule_id' => $rule->id,
             'matched_rule_name' => $rule->name,
-            'trebel_template_id' => $rule->trebelTemplate->external_template_id,
-            'trebel_response' => $trebelResponse,
+            'treble_template_id' => $rule->trebleTemplate->external_template_id,
+            'treble_request' => [
+                'poll_id' => $rule->trebleTemplate->external_template_id,
+                'template_name' => $rule->trebleTemplate->name,
+                'phone' => preg_replace('/\D+/', '', (string) ($contactProperties['phone'] ?? $contactProperties['mobilephone'] ?? '')) ?: null,
+            ],
+            'treble_response' => $trebleResponse,
             'contact_properties' => $contactProperties,
             'hubspot_note' => null,
         ];
 
-        if ($trebelResponse['success'] ?? false) {
+        if ($trebleResponse['success'] ?? false) {
             $record->update([
                 'status' => 'success',
-                'message' => 'Trebel template dispatched successfully.',
+                'message' => 'Treble template dispatched successfully.',
                 'details' => $details,
             ]);
             return;
@@ -153,19 +158,19 @@ class ProcessContactPropertyChangeJob implements ShouldQueue
         $hubspotNote = $hubspotContactSnapshotService->addContactNote(
             $this->hubspotConnection,
             $hubspotObjectId,
-            'Trebel dispatch failed for this contact.',
+            'Treble dispatch failed for this contact.',
             [
                 'rule' => $rule->name,
-                'template_id' => $rule->trebelTemplate->external_template_id,
-                'status_code' => $trebelResponse['status_code'] ?? null,
-                'error' => $trebelResponse['error']['message'] ?? null,
+                'template_id' => $rule->trebleTemplate->external_template_id,
+                'status_code' => $trebleResponse['status_code'] ?? null,
+                'error' => $trebleResponse['error']['message'] ?? null,
             ]
         );
         $details['hubspot_note'] = $hubspotNote;
 
         $record->update([
             'status' => 'error',
-            'message' => $trebelResponse['error']['message'] ?? 'Trebel dispatch failed.',
+            'message' => $trebleResponse['error']['message'] ?? 'Treble dispatch failed.',
             'details' => $details,
         ]);
     }

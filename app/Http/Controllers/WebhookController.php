@@ -5,10 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Http\Request;
 use App\Events\HubSpot\ContactPropertyChangedEvent;
 use App\Models\Client;
-use App\Models\Platform;
 use App\Models\PlatformConnection;
-use App\WebhookClient\WebhookProcessor;
-use Spatie\WebhookClient\WebhookConfig;
+use App\Services\Treble\TrebleStatusWebhookService;
 use Symfony\Component\HttpFoundation\Response;
 
 class WebhookController extends Controller
@@ -35,7 +33,7 @@ class WebhookController extends Controller
             ], 422);
         }
 
-        if (! $this->isValidSignature($request, $connection)) {
+        if (! $this->isValidHashedSignature($request, $connection)) {
             return response()->json([
                 'status' => 'error',
                 'message' => 'Invalid webhook signature.',
@@ -57,46 +55,66 @@ class WebhookController extends Controller
         ], 200);
     }
 
-    public function handleLegacyWebhook(string $platform, Request $request): Response
-    {
-        $platformModel = Platform::query()->where('slug', $platform)->first();
+    public function handleTrebleStatusWebhook(
+        Client $client,
+        Request $request,
+        TrebleStatusWebhookService $trebleStatusWebhookService
+    ): Response {
+        $connection = PlatformConnection::query()
+            ->where('client_id', $client->id)
+            ->where('platform_type', 'treble')
+            ->where('active', true)
+            ->first();
 
-        if (! $platformModel) {
+        if (! $connection) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Webhook not received, platform not found.',
-            ], 400);
+                'message' => 'Treble platform connection not found.',
+            ], 404);
         }
 
-        if (! $platformModel->secret_key || ! $platformModel->signature) {
+        if (! $this->isValidSecretToken($request, $connection)) {
             return response()->json([
                 'status' => 'error',
-                'message' => 'Webhook not received, missing secret key or signature configuration.',
-            ], 400);
+                'message' => 'Invalid webhook signature.',
+            ], 401);
         }
 
-        $config = new WebhookConfig([
-            'name' => $platformModel->slug,
-            'signing_secret' => $platformModel->secret_key,
-            'signature_header_name' => $platformModel->signature,
-            'signature_validator' => \App\WebhookClient\WebhookCustomSignatureValidator::class,
-            'webhook_profile' => \App\WebhookClient\WebhookCustomProfile::class,
-            'webhook_response' => \App\WebhookClient\WebhookCustomResponse::class,
-            'webhook_model' => \Spatie\WebhookClient\Models\WebhookCall::class,
-            'store_headers' => ['platform' => json_encode($platformModel->only(['id', 'name', 'slug', 'type']))],
-            'process_webhook_job' => \App\Jobs\WebhookCustomProcessJob::class,
-        ]);
+        if (! $request->isJson()) {
+            return response()->json([
+                'status' => 'error',
+                'message' => 'Treble callback requires application/json payload.',
+            ], 422);
+        }
 
-        $processor = new WebhookProcessor($request, $config);
-        $processor->process();
+        $payload = $request->all();
+        $payloads = $this->extractPayloads($payload);
+        $results = [];
+
+        foreach ($payloads as $item) {
+            if (! is_array($item)) {
+                continue;
+            }
+
+            $result = $trebleStatusWebhookService->process($client, $connection, $item);
+            if (! ($result['success'] ?? false)) {
+                return response()->json([
+                    'status' => 'error',
+                    'message' => $result['message'] ?? 'Treble callback processing failed.',
+                ], (int) ($result['status_code'] ?? 422));
+            }
+
+            $results[] = $result;
+        }
 
         return response()->json([
             'status' => 'success',
-            'message' => 'Webhook received',
+            'processed' => count($results),
+            'results' => $results,
         ], 200);
     }
 
-    private function isValidSignature(Request $request, PlatformConnection $connection): bool
+    private function isValidHashedSignature(Request $request, PlatformConnection $connection): bool
     {
         $headerName = (string) ($connection->signature_header ?? '');
         $secret = (string) ($connection->webhook_secret ?? '');
@@ -113,6 +131,22 @@ class WebhookController extends Controller
         $computedSignature = hash('sha256', $secret . $request->getContent());
 
         return hash_equals($signature, $computedSignature);
+    }
+
+    private function isValidSecretToken(Request $request, PlatformConnection $connection): bool
+    {
+        $headerName = (string) ($connection->signature_header ?? '');
+        $secret = (string) ($connection->webhook_secret ?? '');
+
+        if ($headerName === '' || $secret === '') {
+            return false;
+        }
+
+        $providedSecret = $request->header($headerName) ?? $request->query($headerName);
+
+        return is_string($providedSecret)
+            && trim($providedSecret) !== ''
+            && hash_equals($secret, trim($providedSecret));
     }
 
     private function extractPayloads(array $payload): array

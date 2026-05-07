@@ -13,7 +13,7 @@ const props = defineProps({
 
 const isEdit = computed(() => props.mode === 'edit');
 const form = useForm({
-    trebel_template_id: props.rule?.trebel_template_id ?? props.templates[0]?.id ?? '',
+    treble_template_id: props.rule?.treble_template_id ?? props.templates[0]?.id ?? '',
     name: props.rule?.name ?? '',
     priority: props.rule?.priority ?? 100,
     trigger_property: props.rule?.trigger_property ?? 'plantilla_de_whatsapp',
@@ -37,7 +37,7 @@ const submit = () => {
     }
 
     form.transform(() => ({
-        trebel_template_id: Number(form.trebel_template_id),
+        treble_template_id: Number(form.treble_template_id),
         name: form.name,
         priority: Number(form.priority),
         trigger_property: form.trigger_property,
@@ -61,7 +61,7 @@ const submit = () => {
         <form class="form" @submit.prevent="submit">
             <div class="grid">
                 <label><span>Nombre</span><input v-model="form.name" type="text" required></label>
-                <label><span>Plantilla Trebel</span><select v-model="form.trebel_template_id"><option v-for="template in templates" :key="template.id" :value="template.id">{{ template.name }} ({{ template.external_template_id }})</option></select></label>
+                <label><span>Plantilla Treble</span><select v-model="form.treble_template_id"><option v-for="template in templates" :key="template.id" :value="template.id">{{ template.name }} ({{ template.external_template_id }})</option></select></label>
                 <label><span>Prioridad</span><input v-model="form.priority" type="number" min="0"></label>
                 <label><span>Trigger property</span><input v-model="form.trigger_property" type="text" required></label>
                 <label><span>Trigger value</span><input v-model="form.trigger_value" type="text"></label>

@@ -12,7 +12,7 @@ class MessageRule extends Model
 
     protected $fillable = [
         'client_id',
-        'trebel_template_id',
+        'treble_template_id',
         'name',
         'priority',
         'trigger_property',
@@ -31,8 +31,8 @@ class MessageRule extends Model
         return $this->belongsTo(Client::class);
     }
 
-    public function trebelTemplate(): BelongsTo
+    public function trebleTemplate(): BelongsTo
     {
-        return $this->belongsTo(TrebelTemplate::class);
+        return $this->belongsTo(TrebleTemplate::class);
     }
 }

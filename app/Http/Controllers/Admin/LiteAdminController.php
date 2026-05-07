@@ -8,7 +8,7 @@ use App\Models\MessageRule;
 use App\Models\PlatformConnection;
 use App\Models\Record;
 use App\Models\Role;
-use App\Models\TrebelTemplate;
+use App\Models\TrebleTemplate;
 use App\Models\User;
 
 class LiteAdminController extends Controller
@@ -16,7 +16,7 @@ class LiteAdminController extends Controller
     public function clients()
     {
         $clients = Client::query()
-            ->withCount(['platformConnections', 'trebelTemplates', 'messageRules'])
+            ->withCount(['platformConnections', 'trebleTemplates', 'messageRules'])
             ->orderBy('name')
             ->paginate(15)
             ->through(static function (Client $client): array {
@@ -27,7 +27,7 @@ class LiteAdminController extends Controller
                     'description' => $client->description,
                     'active' => (bool) $client->active,
                     'platform_connections_count' => $client->platform_connections_count,
-                    'trebel_templates_count' => $client->trebel_templates_count,
+                    'treble_templates_count' => $client->treble_templates_count,
                     'message_rules_count' => $client->message_rules_count,
                 ];
             });
@@ -59,7 +59,7 @@ class LiteAdminController extends Controller
             ->orderBy('platform_type')
             ->orderBy('name')
             ->get()
-            ->map(static function (PlatformConnection $connection): array {
+            ->map(function (PlatformConnection $connection) use ($client): array {
                 return [
                     'id' => $connection->id,
                     'name' => $connection->name,
@@ -71,6 +71,9 @@ class LiteAdminController extends Controller
                     'settings' => $connection->settings ?? [],
                     'has_credentials' => ! empty($connection->credentials ?? []),
                     'has_webhook_secret' => filled($connection->webhook_secret),
+                    'status_webhook_url' => $connection->platform_type === 'treble'
+                        ? url('/webhooks/' . $client->slug . '/treble/status')
+                        : null,
                 ];
             });
 
@@ -107,16 +110,22 @@ class LiteAdminController extends Controller
                 'settings' => $connection->settings ?? [],
                 'has_credentials' => ! empty($connection->credentials ?? []),
                 'has_webhook_secret' => filled($connection->webhook_secret),
+                'revealed_webhook_secret' => $connection->platform_type === 'treble'
+                    ? $connection->getAttribute('webhook_secret')
+                    : null,
+                'status_webhook_url' => $connection->platform_type === 'treble'
+                    ? url('/webhooks/' . $client->slug . '/treble/status')
+                    : null,
             ],
         ]);
     }
 
     public function clientTemplates(Client $client)
     {
-        $templates = $client->trebelTemplates()
+        $templates = $client->trebleTemplates()
             ->orderBy('name')
             ->get()
-            ->map(static function (TrebelTemplate $template): array {
+            ->map(static function (TrebleTemplate $template): array {
                 return [
                     'id' => $template->id,
                     'name' => $template->name,
@@ -126,7 +135,7 @@ class LiteAdminController extends Controller
                 ];
             });
 
-        return inertia('Admin/TrebelTemplates', [
+        return inertia('Admin/TrebleTemplates', [
             'client' => $client->only(['id', 'name', 'slug']),
             'templates' => $templates,
         ]);
@@ -134,18 +143,18 @@ class LiteAdminController extends Controller
 
     public function clientTemplatesCreate(Client $client)
     {
-        return inertia('Admin/TrebelTemplatesForm', [
+        return inertia('Admin/TrebleTemplatesForm', [
             'mode' => 'create',
             'client' => $client->only(['id', 'name', 'slug']),
             'template' => null,
         ]);
     }
 
-    public function clientTemplatesEdit(Client $client, TrebelTemplate $template)
+    public function clientTemplatesEdit(Client $client, TrebleTemplate $template)
     {
         abort_unless($template->client_id === $client->id, 404);
 
-        return inertia('Admin/TrebelTemplatesForm', [
+        return inertia('Admin/TrebleTemplatesForm', [
             'mode' => 'edit',
             'client' => $client->only(['id', 'name', 'slug']),
             'template' => [
@@ -161,7 +170,7 @@ class LiteAdminController extends Controller
     public function clientRules(Client $client)
     {
         $rules = $client->messageRules()
-            ->with('trebelTemplate:id,name,external_template_id')
+            ->with('trebleTemplate:id,name,external_template_id')
             ->orderByDesc('priority')
             ->orderBy('name')
             ->get()
@@ -174,11 +183,11 @@ class LiteAdminController extends Controller
                     'trigger_value' => $rule->trigger_value,
                     'conditions' => $rule->conditions ?? [],
                     'active' => (bool) $rule->active,
-                    'trebel_template_id' => $rule->trebel_template_id,
-                    'trebel_template' => $rule->trebelTemplate ? [
-                        'id' => $rule->trebelTemplate->id,
-                        'name' => $rule->trebelTemplate->name,
-                        'external_template_id' => $rule->trebelTemplate->external_template_id,
+                    'treble_template_id' => $rule->treble_template_id,
+                    'treble_template' => $rule->trebleTemplate ? [
+                        'id' => $rule->trebleTemplate->id,
+                        'name' => $rule->trebleTemplate->name,
+                        'external_template_id' => $rule->trebleTemplate->external_template_id,
                     ] : null,
                 ];
             });
@@ -186,7 +195,7 @@ class LiteAdminController extends Controller
         return inertia('Admin/MessageRules', [
             'client' => $client->only(['id', 'name', 'slug']),
             'rules' => $rules,
-            'templates' => $client->trebelTemplates()->where('active', true)->orderBy('name')->get(['id', 'name', 'external_template_id']),
+            'templates' => $client->trebleTemplates()->where('active', true)->orderBy('name')->get(['id', 'name', 'external_template_id']),
         ]);
     }
 
@@ -196,7 +205,7 @@ class LiteAdminController extends Controller
             'mode' => 'create',
             'client' => $client->only(['id', 'name', 'slug']),
             'rule' => null,
-            'templates' => $client->trebelTemplates()->where('active', true)->orderBy('name')->get(['id', 'name', 'external_template_id']),
+            'templates' => $client->trebleTemplates()->where('active', true)->orderBy('name')->get(['id', 'name', 'external_template_id']),
         ]);
     }
 
@@ -215,9 +224,9 @@ class LiteAdminController extends Controller
                 'trigger_value' => $rule->trigger_value,
                 'conditions' => $rule->conditions ?? [],
                 'active' => (bool) $rule->active,
-                'trebel_template_id' => $rule->trebel_template_id,
+                'treble_template_id' => $rule->treble_template_id,
             ],
-            'templates' => $client->trebelTemplates()->where('active', true)->orderBy('name')->get(['id', 'name', 'external_template_id']),
+            'templates' => $client->trebleTemplates()->where('active', true)->orderBy('name')->get(['id', 'name', 'external_template_id']),
         ]);
     }
 

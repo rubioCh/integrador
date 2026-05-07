@@ -5,7 +5,7 @@ namespace Tests\Feature\Lite;
 use App\Models\Client;
 use App\Models\MessageRule;
 use App\Models\PlatformConnection;
-use App\Models\TrebelTemplate;
+use App\Models\TrebleTemplate;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -48,9 +48,9 @@ class ClientWebhookProcessingTest extends TestCase
 
     public function test_webhook_processes_matching_rule_and_creates_success_record(): void
     {
-        [$client, $hubspot, $trebel] = $this->seedClientConnections();
+        [$client, $hubspot, $treble] = $this->seedClientConnections();
 
-        $template = TrebelTemplate::query()->create([
+        $template = TrebleTemplate::query()->create([
             'client_id' => $client->id,
             'name' => 'Bienvenida La Paz',
             'external_template_id' => 'tpl-001',
@@ -63,7 +63,7 @@ class ClientWebhookProcessingTest extends TestCase
 
         MessageRule::query()->create([
             'client_id' => $client->id,
-            'trebel_template_id' => $template->id,
+            'treble_template_id' => $template->id,
             'name' => 'Regla Bienvenida',
             'priority' => 100,
             'trigger_property' => 'plantilla_de_whatsapp',
@@ -86,7 +86,7 @@ class ClientWebhookProcessingTest extends TestCase
                     'plantilla_de_whatsapp' => 'Bienvenida',
                 ],
             ], 200),
-            'https://trebel.example/messages/send' => Http::response([
+            'https://treble.example/messages/send' => Http::response([
                 'id' => 'msg-100',
                 'status' => 'queued',
             ], 200),
@@ -122,14 +122,14 @@ class ClientWebhookProcessingTest extends TestCase
             'active' => true,
         ]);
 
-        $templateOne = TrebelTemplate::query()->create([
+        $templateOne = TrebleTemplate::query()->create([
             'client_id' => $client->id,
             'name' => 'Low Priority',
             'external_template_id' => 'tpl-low',
             'payload_mapping' => ['template_id' => '{{template.external_template_id}}'],
             'active' => true,
         ]);
-        $templateTwo = TrebelTemplate::query()->create([
+        $templateTwo = TrebleTemplate::query()->create([
             'client_id' => $client->id,
             'name' => 'High Priority',
             'external_template_id' => 'tpl-high',
@@ -139,7 +139,7 @@ class ClientWebhookProcessingTest extends TestCase
 
         MessageRule::query()->create([
             'client_id' => $client->id,
-            'trebel_template_id' => $templateOne->id,
+            'treble_template_id' => $templateOne->id,
             'name' => 'Low',
             'priority' => 10,
             'trigger_property' => 'plantilla_de_whatsapp',
@@ -149,7 +149,7 @@ class ClientWebhookProcessingTest extends TestCase
         ]);
         MessageRule::query()->create([
             'client_id' => $client->id,
-            'trebel_template_id' => $templateTwo->id,
+            'treble_template_id' => $templateTwo->id,
             'name' => 'High',
             'priority' => 100,
             'trigger_property' => 'plantilla_de_whatsapp',
@@ -168,11 +168,11 @@ class ClientWebhookProcessingTest extends TestCase
         $this->assertSame('High', $resolved->name);
     }
 
-    public function test_trebel_error_creates_hubspot_note_result_in_record_details(): void
+    public function test_treble_error_creates_hubspot_note_result_in_record_details(): void
     {
         [$client] = $this->seedClientConnections();
 
-        $template = TrebelTemplate::query()->create([
+        $template = TrebleTemplate::query()->create([
             'client_id' => $client->id,
             'name' => 'Error Template',
             'external_template_id' => 'tpl-error',
@@ -182,7 +182,7 @@ class ClientWebhookProcessingTest extends TestCase
 
         MessageRule::query()->create([
             'client_id' => $client->id,
-            'trebel_template_id' => $template->id,
+            'treble_template_id' => $template->id,
             'name' => 'Rule',
             'priority' => 100,
             'trigger_property' => 'plantilla_de_whatsapp',
@@ -202,7 +202,7 @@ class ClientWebhookProcessingTest extends TestCase
                     'plantilla_de_whatsapp' => 'Bienvenida',
                 ],
             ], 200),
-            'https://trebel.example/messages/send' => Http::response([
+            'https://treble.example/messages/send' => Http::response([
                 'error' => 'failed',
             ], 500),
             'https://hubspot.example/crm/v3/objects/notes' => Http::response([
@@ -248,13 +248,13 @@ class ClientWebhookProcessingTest extends TestCase
             'active' => true,
         ]);
 
-        $trebel = PlatformConnection::query()->create([
+        $treble = PlatformConnection::query()->create([
             'client_id' => $client->id,
-            'platform_type' => 'trebel',
-            'name' => 'Trebel',
-            'slug' => 'trebel',
-            'base_url' => 'https://trebel.example',
-            'credentials' => ['api_key' => 'trebel-token'],
+            'platform_type' => 'treble',
+            'name' => 'Treble',
+            'slug' => 'treble',
+            'base_url' => 'https://treble.example',
+            'credentials' => ['api_key' => 'treble-token'],
             'settings' => [
                 'send_path' => '/messages/send',
                 'auth_mode' => 'bearer_api_key',
@@ -266,6 +266,6 @@ class ClientWebhookProcessingTest extends TestCase
             'active' => true,
         ]);
 
-        return [$client, $hubspot, $trebel];
+        return [$client, $hubspot, $treble];
     }
 }

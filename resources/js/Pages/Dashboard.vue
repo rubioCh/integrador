@@ -17,10 +17,10 @@ defineProps({
     <AdminLayout title="Dashboard">
         <div class="dashboard-grid">
             <section class="hero-card">
-                <p class="kicker">Lite HubSpot -> Trebel</p>
+                <p class="kicker">Lite HubSpot -> Treble</p>
                 <h2>Operación multi-cliente</h2>
                 <p>
-                    Configura reglas por cliente, escucha cambios en HubSpot y despacha plantillas a Trebel con trazabilidad completa.
+                    Configura reglas por cliente, escucha cambios en HubSpot y despacha plantillas a Treble con trazabilidad completa.
                 </p>
             </section>
 
@@ -73,7 +73,7 @@ defineProps({
                     </div>
                     <div class="meta">
                         <span>{{ client.platform_connections_count }} conexiones</span>
-                        <span>{{ client.trebel_templates_count }} plantillas</span>
+                        <span>{{ client.treble_templates_count }} plantillas</span>
                         <span>{{ client.message_rules_count }} reglas</span>
                     </div>
                     <a :href="`/admin/clients/${client.id}/connections`">Abrir</a>

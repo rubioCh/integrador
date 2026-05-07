@@ -26,9 +26,9 @@ class Client extends Model
         return $this->hasMany(PlatformConnection::class);
     }
 
-    public function trebelTemplates(): HasMany
+    public function trebleTemplates(): HasMany
     {
-        return $this->hasMany(TrebelTemplate::class);
+        return $this->hasMany(TrebleTemplate::class);
     }
 
     public function messageRules(): HasMany

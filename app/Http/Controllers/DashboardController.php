@@ -6,7 +6,7 @@ use App\Models\Client;
 use App\Models\MessageRule;
 use App\Models\PlatformConnection;
 use App\Models\Record;
-use App\Models\TrebelTemplate;
+use App\Models\TrebleTemplate;
 
 class DashboardController extends Controller
 {
@@ -15,7 +15,7 @@ class DashboardController extends Controller
         $stats = [
             'clients' => Client::count(),
             'connections' => PlatformConnection::count(),
-            'templates' => TrebelTemplate::count(),
+            'templates' => TrebleTemplate::count(),
             'rules' => MessageRule::count(),
             'records' => Record::count(),
             'active_clients' => Client::where('active', true)->count(),
@@ -24,7 +24,7 @@ class DashboardController extends Controller
         return inertia('Dashboard', [
             'stats' => $stats,
             'recent_clients' => Client::query()
-                ->withCount(['platformConnections', 'trebelTemplates', 'messageRules'])
+                ->withCount(['platformConnections', 'trebleTemplates', 'messageRules'])
                 ->orderBy('name')
                 ->limit(6)
                 ->get()
@@ -34,7 +34,7 @@ class DashboardController extends Controller
                     'slug' => $client->slug,
                     'active' => (bool) $client->active,
                     'platform_connections_count' => $client->platform_connections_count,
-                    'trebel_templates_count' => $client->trebel_templates_count,
+                    'treble_templates_count' => $client->treble_templates_count,
                     'message_rules_count' => $client->message_rules_count,
                 ]),
         ]);

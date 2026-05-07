@@ -1,8 +1,8 @@
 <script setup>
 import ClientTabs from '@/Components/ClientTabs.vue';
 import AdminLayout from '@/Layouts/AdminLayout.vue';
-import { Link, useForm } from '@inertiajs/vue3';
-import { computed } from 'vue';
+import { Link, router, useForm } from '@inertiajs/vue3';
+import { computed, ref } from 'vue';
 
 const props = defineProps({
     mode: { type: String, required: true },
@@ -11,8 +11,10 @@ const props = defineProps({
 });
 
 const isEdit = computed(() => props.mode === 'edit');
+const showHubspotCredentials = ref(!isEdit.value || !props.connection?.has_webhook_secret || !props.connection?.has_credentials);
+const showTrebleCredentials = ref(!isEdit.value || !props.connection?.has_credentials);
 const isHubspot = computed(() => form.platform_type === 'hubspot');
-const isTrebel = computed(() => form.platform_type === 'trebel');
+const isTreble = computed(() => form.platform_type === 'treble');
 const form = useForm({
     name: props.connection?.name ?? '',
     slug: props.connection?.slug ?? '',
@@ -34,18 +36,21 @@ const form = useForm({
     ], null, 2),
     send_path: props.connection?.settings?.send_path ?? '',
     http_method: props.connection?.settings?.http_method ?? 'POST',
-    auth_mode: props.connection?.settings?.auth_mode ?? 'bearer_api_key',
+    auth_mode: props.connection?.settings?.auth_mode ?? 'authorization_header',
     api_key_header: props.connection?.settings?.api_key_header ?? 'X-API-Key',
+    country_code_default: props.connection?.settings?.country_code_default ?? '52',
     request_template_text: JSON.stringify(props.connection?.settings?.request_template ?? {
-        template_id: '{{template.external_template_id}}',
-        phone: '{{contact.phone}}',
+        name: '{{contact.firstname}}',
+        campus: '{{contact.campus_de_interes}}',
+        last_name: '{{contact.lastname}}',
         first_name: '{{contact.firstname}}',
+        school_level: '{{contact.nivel_escolar_de_interes}}',
     }, null, 2),
     headers_text: JSON.stringify(props.connection?.settings?.headers ?? {}, null, 2),
     timeout_seconds: props.connection?.settings?.timeout_seconds ?? 20,
     active: props.connection?.active ?? true,
 });
-const updateHubspotCredentials = computed(() => form.webhook_secret !== '' || form.access_token !== '');
+const copyFeedback = ref('');
 
 const parseJsonField = (field, fallback) => {
     try {
@@ -58,25 +63,77 @@ const parseJsonField = (field, fallback) => {
 };
 
 const enableHubspotCredentialsEdit = () => {
-    form.webhook_secret = ' ';
-    form.access_token = ' ';
+    showHubspotCredentials.value = true;
 };
 
 const disableHubspotCredentialsEdit = () => {
+    showHubspotCredentials.value = false;
     form.webhook_secret = '';
     form.access_token = '';
 };
 
-const normalizeWebhookSecretInput = () => {
-    if (form.webhook_secret === ' ') {
-        form.webhook_secret = '';
+const rotateTrebleWebhookSecret = () => {
+    if (!isEdit.value || !props.connection?.id) {
+        return;
     }
+
+    router.post(`/admin/clients/${props.client.id}/connections/${props.connection.id}/rotate-webhook-secret`, {}, {
+        preserveScroll: true,
+    });
 };
 
-const normalizeAccessTokenInput = () => {
-    if (form.access_token === ' ') {
-        form.access_token = '';
+const revokeTrebleWebhookSecret = () => {
+    if (!isEdit.value || !props.connection?.id) {
+        return;
     }
+
+    router.post(`/admin/clients/${props.client.id}/connections/${props.connection.id}/revoke-webhook-secret`, {}, {
+        preserveScroll: true,
+    });
+};
+
+const enableTrebleCredentialsEdit = () => {
+    showTrebleCredentials.value = true;
+};
+
+const disableTrebleCredentialsEdit = () => {
+    showTrebleCredentials.value = false;
+    form.api_key = '';
+    form.username = '';
+    form.password = '';
+};
+
+const fallbackCopyText = (value) => {
+    const helper = document.createElement('textarea');
+    helper.value = value;
+    helper.setAttribute('readonly', 'readonly');
+    helper.style.position = 'absolute';
+    helper.style.left = '-9999px';
+    document.body.appendChild(helper);
+    helper.select();
+    document.execCommand('copy');
+    document.body.removeChild(helper);
+};
+
+const copyText = async (value, label) => {
+    if (!value) {
+        return;
+    }
+
+    try {
+        if (navigator?.clipboard?.writeText) {
+            await navigator.clipboard.writeText(value);
+        } else {
+            fallbackCopyText(value);
+        }
+    } catch (error) {
+        fallbackCopyText(value);
+    }
+
+    copyFeedback.value = `${label} copiado`;
+    window.setTimeout(() => {
+        copyFeedback.value = '';
+    }, 1800);
 };
 
 const submit = () => {
@@ -94,7 +151,7 @@ const submit = () => {
         platform_type: form.platform_type,
         base_url: form.base_url || null,
         signature_header: form.signature_header || null,
-        webhook_secret: form.webhook_secret || null,
+            webhook_secret: form.webhook_secret || null,
         active: !!form.active,
         credentials: {
             access_token: form.access_token || undefined,
@@ -108,6 +165,7 @@ const submit = () => {
             http_method: form.http_method,
             auth_mode: form.auth_mode || null,
             api_key_header: form.api_key_header || null,
+            country_code_default: form.country_code_default || '52',
             request_template: requestTemplate,
             headers,
             timeout_seconds: Number(form.timeout_seconds || 20),
@@ -117,7 +175,11 @@ const submit = () => {
     form.transform(() => payload);
 
     if (isEdit.value) {
-        form.put(`/admin/clients/${props.client.id}/connections/${props.connection.id}`);
+        form.transform(() => ({
+            ...payload,
+            _method: 'put',
+        }));
+        form.post(`/admin/clients/${props.client.id}/connections/${props.connection.id}`);
         return;
     }
 
@@ -129,10 +191,14 @@ const submit = () => {
     <AdminLayout :title="isEdit ? 'Editar conexión' : 'Nueva conexión'">
         <ClientTabs :client="client" />
         <form class="form" @submit.prevent="submit">
+            <div v-if="Object.keys(form.errors).length" class="error-summary">
+                <strong>No pudimos guardar la conexión.</strong>
+                <span>Revisa los campos marcados e intenta de nuevo.</span>
+            </div>
             <div class="grid">
-                <label><span>Nombre</span><input v-model="form.name" type="text" required></label>
-                <label><span>Slug</span><input v-model="form.slug" type="text"></label>
-                <label><span>Tipo de plataforma</span><select v-model="form.platform_type"><option value="hubspot">HubSpot</option><option value="trebel">Trebel</option></select></label>
+                <label><span>Nombre</span><input v-model="form.name" type="text" required><small v-if="form.errors.name" class="field-error">{{ form.errors.name }}</small></label>
+                <label><span>Slug</span><input v-model="form.slug" type="text"><small v-if="form.errors.slug" class="field-error">{{ form.errors.slug }}</small></label>
+                <label><span>Tipo de plataforma</span><select v-model="form.platform_type"><option value="hubspot">HubSpot</option><option value="treble">Treble</option></select><small v-if="form.errors.platform_type" class="field-error">{{ form.errors.platform_type }}</small></label>
             </div>
 
             <section v-if="isHubspot" class="section">
@@ -141,8 +207,8 @@ const submit = () => {
                     <p>Webhook, token y propiedades del contacto a consultar.</p>
                 </header>
                 <div class="grid">
-                    <label><span>Base URL</span><input v-model="form.base_url" type="url" placeholder="https://api.hubapi.com"></label>
-                    <label><span>Header de firma</span><input v-model="form.signature_header" type="text" placeholder="x-signature"></label>
+                    <label><span>Base URL</span><input v-model="form.base_url" type="url" placeholder="https://api.hubapi.com"><small v-if="form.errors.base_url" class="field-error">{{ form.errors.base_url }}</small></label>
+                    <label><span>Header de firma</span><input v-model="form.signature_header" type="text" placeholder="x-signature"><small v-if="form.errors.signature_header" class="field-error">{{ form.errors.signature_header }}</small></label>
                     <label><span>Timeout (segundos)</span><input v-model="form.timeout_seconds" type="number" min="1"></label>
                     <label class="toggle-field">
                         <span>Estado</span>
@@ -168,19 +234,18 @@ const submit = () => {
                     <button
                         type="button"
                         class="ghost-button"
-                        @click="updateHubspotCredentials ? disableHubspotCredentialsEdit() : enableHubspotCredentialsEdit()"
+                        @click="showHubspotCredentials ? disableHubspotCredentialsEdit() : enableHubspotCredentialsEdit()"
                     >
-                        {{ updateHubspotCredentials ? 'Conservar actuales' : 'Actualizar credenciales' }}
+                        {{ showHubspotCredentials ? 'Conservar actuales' : 'Actualizar credenciales' }}
                     </button>
                 </div>
-                <div v-if="!isEdit || updateHubspotCredentials || (!connection?.has_webhook_secret && !connection?.has_credentials)" class="grid">
+                <div v-if="showHubspotCredentials" class="grid">
                     <label>
                         <span>Webhook secret</span>
                         <input
                             v-model="form.webhook_secret"
                             type="password"
                             :placeholder="isEdit ? 'solo para reemplazar' : 'Webhook secret'"
-                            @focus="normalizeWebhookSecretInput"
                         >
                     </label>
                     <label>
@@ -189,35 +254,51 @@ const submit = () => {
                             v-model="form.access_token"
                             type="password"
                             :placeholder="isEdit ? 'solo para reemplazar' : 'HubSpot token'"
-                            @focus="normalizeAccessTokenInput"
                         >
                     </label>
                 </div>
                 <label><span>Propiedades HubSpot a leer</span><textarea v-model="form.contact_properties_text" rows="8"></textarea></label>
             </section>
 
-            <section v-if="isTrebel" class="section">
+            <section v-if="isTreble" class="section">
                 <header>
-                    <h2>Trebel</h2>
+                    <h2>Treble</h2>
                     <p>Endpoint, autenticación y payload configurable.</p>
                 </header>
+                <div v-if="isEdit && connection?.status_webhook_url" class="credentials-bar">
+                    <div class="credentials-copy">
+                        <strong>Webhook de estados</strong>
+                        <small class="hint ok">{{ connection.status_webhook_url }}</small>
+                    </div>
+                </div>
                 <div class="grid">
-                    <label><span>Base URL</span><input v-model="form.base_url" type="url" required placeholder="https://api.trebel.example"></label>
-                    <label><span>Send path</span><input v-model="form.send_path" type="text" placeholder="/messages/send"></label>
-                    <label><span>HTTP method</span><select v-model="form.http_method"><option value="POST">POST</option><option value="PUT">PUT</option><option value="PATCH">PATCH</option></select></label>
-                    <label><span>Auth mode</span><select v-model="form.auth_mode"><option value="bearer_api_key">Bearer API key</option><option value="header_api_key">Header API key</option><option value="basic_auth">Basic auth</option></select></label>
+                    <label><span>Base URL</span><input v-model="form.base_url" type="url" required placeholder="https://main.treble.ai"><small v-if="form.errors.base_url" class="field-error">{{ form.errors.base_url }}</small></label>
+                    <label><span>Endpoint de despliegue</span><input v-model="form.send_path" type="text" placeholder="/deployment/api/poll/{poll_id}"><small v-if="form.errors['settings.send_path']" class="field-error">{{ form.errors['settings.send_path'] }}</small></label>
+                    <label><span>HTTP method</span><select v-model="form.http_method"><option value="POST">POST</option></select></label>
+                    <label><span>Auth mode</span><select v-model="form.auth_mode"><option value="authorization_header">Authorization header</option><option value="bearer_api_key">Bearer API key</option><option value="header_api_key">Header API key</option><option value="basic_auth">Basic auth</option></select></label>
                     <label v-if="form.auth_mode === 'header_api_key'"><span>Header API key</span><input v-model="form.api_key_header" type="text"></label>
-                    <label v-if="form.auth_mode === 'bearer_api_key' || form.auth_mode === 'header_api_key'">
+                    <label v-if="(form.auth_mode === 'authorization_header' || form.auth_mode === 'bearer_api_key' || form.auth_mode === 'header_api_key') && showTrebleCredentials">
                         <span>API key</span>
-                        <small v-if="isEdit && connection?.has_credentials" class="hint ok">Ya configurada. Déjala en blanco para conservarla.</small>
-                        <input v-model="form.api_key" type="password" :placeholder="isEdit ? 'solo para reemplazar' : 'Trebel API key'">
+                        <input
+                            v-model="form.api_key"
+                            type="password"
+                            :placeholder="isEdit ? 'solo para reemplazar' : 'Treble API key'"
+                        >
+                        <small v-if="form.errors['credentials.api_key']" class="field-error">{{ form.errors['credentials.api_key'] }}</small>
                     </label>
-                    <label v-if="form.auth_mode === 'basic_auth'"><span>Username</span><input v-model="form.username" type="text"></label>
-                    <label v-if="form.auth_mode === 'basic_auth'">
+                    <label v-if="form.auth_mode === 'basic_auth' && showTrebleCredentials">
+                        <span>Username</span>
+                        <input v-model="form.username" type="text">
+                    </label>
+                    <label v-if="form.auth_mode === 'basic_auth' && showTrebleCredentials">
                         <span>Password</span>
-                        <small v-if="isEdit && connection?.has_credentials" class="hint ok">Ya configurada. Déjala en blanco para conservarla.</small>
-                        <input v-model="form.password" type="password" :placeholder="isEdit ? 'solo para reemplazar' : 'Password'">
+                        <input
+                            v-model="form.password"
+                            type="password"
+                            :placeholder="isEdit ? 'solo para reemplazar' : 'Password'"
+                        >
                     </label>
+                    <label><span>Country code default</span><input v-model="form.country_code_default" type="text" placeholder="52"></label>
                     <label><span>Timeout (segundos)</span><input v-model="form.timeout_seconds" type="number" min="1"></label>
                     <label class="toggle-field">
                         <span>Estado</span>
@@ -235,8 +316,69 @@ const submit = () => {
                         </button>
                     </label>
                 </div>
+                <div class="credentials-bar">
+                    <div class="credentials-copy">
+                        <strong>Webhook secret</strong>
+                        <small v-if="connection?.has_webhook_secret" class="hint ok">Ya configurado y generado automáticamente desde la API key.</small>
+                        <small v-else class="hint">Se generará automáticamente al guardar una API key.</small>
+                    </div>
+                    <div class="inline-actions" v-if="isEdit">
+                        <button
+                            v-if="connection?.has_webhook_secret"
+                            type="button"
+                            class="ghost-button"
+                            @click="revokeTrebleWebhookSecret"
+                        >
+                            Revocar
+                        </button>
+                        <button
+                            type="button"
+                            class="ghost-button"
+                            @click="rotateTrebleWebhookSecret"
+                        >
+                            {{ connection?.has_webhook_secret ? 'Regenerar' : 'Generar ahora' }}
+                        </button>
+                    </div>
+                </div>
+                <div v-if="isEdit && connection?.has_webhook_secret" class="grid">
+                    <label class="aligned-copy-field">
+                        <span>Header de firma</span>
+                        <div class="copy-field">
+                            <input v-model="form.signature_header" type="text" placeholder="X-Treble-Webhook-Secret">
+                            <button type="button" class="ghost-button" @click="copyText(form.signature_header || 'X-Treble-Webhook-Secret', 'Header')">Copiar</button>
+                        </div>
+                        <small class="hint">Treble debe enviar este header con el webhook secret actual.</small>
+                        <small v-if="form.errors.signature_header" class="field-error">{{ form.errors.signature_header }}</small>
+                    </label>
+                    <label class="aligned-copy-field">
+                        <span>Webhook secret actual</span>
+                        <div class="copy-field">
+                            <input :value="connection?.revealed_webhook_secret || ''" type="text" readonly>
+                            <button type="button" class="ghost-button" @click="copyText(connection?.revealed_webhook_secret || '', 'Webhook secret')">Copiar</button>
+                        </div>
+                        <small class="hint placeholder-hint" aria-hidden="true">&nbsp;</small>
+                    </label>
+                </div>
+                <p v-if="copyFeedback" class="copy-feedback">{{ copyFeedback }}</p>
+                <div v-if="isEdit && connection?.has_credentials" class="credentials-bar">
+                    <div class="credentials-copy">
+                        <strong>Credenciales de API</strong>
+                        <small class="hint ok">Ya configuradas. Ábrelas solo si necesitas reemplazarlas.</small>
+                    </div>
+                    <button
+                        type="button"
+                        class="ghost-button"
+                        @click="showTrebleCredentials ? disableTrebleCredentialsEdit() : enableTrebleCredentialsEdit()"
+                    >
+                        {{ showTrebleCredentials ? 'Conservar actuales' : 'Actualizar credenciales' }}
+                    </button>
+                </div>
                 <label><span>Headers JSON</span><textarea v-model="form.headers_text" rows="8" placeholder='{"X-Workspace":"abc"}'></textarea></label>
-                <label><span>Request template JSON</span><textarea v-model="form.request_template_text" rows="12" placeholder='{"template_id":"{{template.external_template_id}}","phone":"{{contact.phone}}"}'></textarea></label>
+                <label>
+                    <span>Request template JSON</span>
+                    <textarea v-model="form.request_template_text" rows="12" placeholder='{"name":"{{contact.firstname}}","campus":"{{contact.campus_de_interes}}"}'></textarea>
+                    <small class="hint">Cada entrada se enviará a Treble como un item de <code>user_session_keys</code>.</small>
+                </label>
             </section>
 
             <div class="actions">
@@ -270,6 +412,40 @@ span { color: #334155; font-size: 14px; }
 .credentials-copy {
     display: grid;
     gap: 2px;
+}
+.inline-actions {
+    display: inline-flex;
+    gap: 8px;
+}
+.copy-field {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+}
+.aligned-copy-field {
+    align-content: start;
+}
+.copy-feedback {
+    margin: 0;
+    font-size: 12px;
+    color: #047857;
+}
+.placeholder-hint {
+    visibility: hidden;
+}
+.error-summary {
+    display: grid;
+    gap: 4px;
+    border: 1px solid #fecaca;
+    border-radius: 8px;
+    background: #fef2f2;
+    color: #991b1b;
+    padding: 10px 12px;
+}
+.field-error {
+    font-size: 12px;
+    color: #b91c1c;
 }
 .ghost-button {
     border: 1px solid #cbd5e1;
