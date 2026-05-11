@@ -64,9 +64,9 @@ class AspelServiceTest extends TestCase
 
         $service = new AspelService(
             $platform,
+            app(AuthStrategyResolver::class),
             $event,
             null,
-            app(AuthStrategyResolver::class),
         );
 
         $body = $service->resolveBody($event, [
@@ -123,9 +123,9 @@ class AspelServiceTest extends TestCase
 
         $service = new AspelService(
             $platform,
+            app(AuthStrategyResolver::class),
             $event,
             null,
-            app(AuthStrategyResolver::class),
         );
 
         $adapter = Mockery::mock(GenericHttpAdapter::class);
@@ -203,9 +203,9 @@ class AspelServiceTest extends TestCase
 
         $service = new AspelService(
             $platform,
+            app(AuthStrategyResolver::class),
             $event,
             null,
-            app(AuthStrategyResolver::class),
         );
 
         $adapter = Mockery::mock(GenericHttpAdapter::class);
@@ -289,9 +289,9 @@ class AspelServiceTest extends TestCase
 
         $service = new AspelService(
             $platform,
+            app(AuthStrategyResolver::class),
             $event,
             null,
-            app(AuthStrategyResolver::class),
         );
 
         $adapter = Mockery::mock(GenericHttpAdapter::class);

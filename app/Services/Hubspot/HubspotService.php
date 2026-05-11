@@ -4,6 +4,7 @@ namespace App\Services\Hubspot;
 
 use App\Jobs\ProcessSignedQuotesJob;
 use App\Models\Event;
+use App\Models\Property;
 use App\Models\PropertyRelationship;
 use App\Models\Platform;
 use App\Models\Record;
@@ -464,6 +465,101 @@ class HubspotService extends BaseService
         ]);
     }
 
+    public function syncAspelContactToHubspot(array $payload): array
+    {
+        $mappingEventId = $this->resolveAspelMappingEventId($payload);
+        $sourceData = Arr::get($payload, 'aspel_detail', []);
+
+        if (! is_array($sourceData) || $sourceData === []) {
+            return [
+                'success' => false,
+                'message' => 'Missing ASPEL contact detail payload for HubSpot sync.',
+                'data' => [
+                    'mapping_event_id' => $mappingEventId,
+                    'received_keys' => array_keys($payload),
+                ],
+            ];
+        }
+
+        $matchResult = $this->findHubspotContactForAspelPayload($payload, $sourceData);
+        if (! ($matchResult['success'] ?? false)) {
+            return $matchResult;
+        }
+
+        $properties = array_merge(
+            $this->buildHubspotContactPropertiesFromSource($mappingEventId, $sourceData),
+            $this->buildAspelInboundAuditProperties($payload, $sourceData)
+        );
+
+        if ($properties === []) {
+            return [
+                'success' => false,
+                'message' => 'No mapped HubSpot properties found for ASPEL contact sync.',
+                'data' => [
+                    'mapping_event_id' => $mappingEventId,
+                    'source_keys' => array_keys($sourceData),
+                ],
+            ];
+        }
+
+        if (($matchResult['found'] ?? false) === true) {
+            $contactId = (string) $matchResult['contact_id'];
+            $response = $this->hubspotApi->updateObject('contacts', $contactId, $properties);
+
+            if (! ($response['success'] ?? false)) {
+                $noteResult = $this->tryLogContactFailureNote(
+                    'contacts',
+                    $contactId,
+                    'Failed to update HubSpot contact from ASPEL change.',
+                    $response
+                );
+
+                return [
+                    'success' => false,
+                    'message' => 'Failed to update HubSpot contact from ASPEL change.',
+                    'data' => [
+                        'error' => $response['error'] ?? null,
+                        'hubspot_note' => $noteResult,
+                        'contact_id' => $contactId,
+                        'mapping_event_id' => $mappingEventId,
+                        'attempted_properties' => $properties,
+                        'matched_by' => $matchResult['matched_by'] ?? null,
+                    ],
+                ];
+            }
+
+            return $this->success('HubSpot contact updated from ASPEL change.', [
+                'operation' => 'updated',
+                'contact_id' => $contactId,
+                'matched_by' => $matchResult['matched_by'] ?? null,
+                'mapping_event_id' => $mappingEventId,
+                'updated_properties' => $properties,
+                'hubspot_response' => $response['data'] ?? [],
+            ]);
+        }
+
+        $response = $this->hubspotApi->createObject('contacts', $properties);
+        if (! ($response['success'] ?? false)) {
+            return [
+                'success' => false,
+                'message' => 'Failed to create HubSpot contact from ASPEL change.',
+                'data' => [
+                    'error' => $response['error'] ?? null,
+                    'mapping_event_id' => $mappingEventId,
+                    'attempted_properties' => $properties,
+                ],
+            ];
+        }
+
+        return $this->success('HubSpot contact created from ASPEL change.', [
+            'operation' => 'created',
+            'contact_id' => Arr::get($response, 'data.id'),
+            'mapping_event_id' => $mappingEventId,
+            'created_properties' => $properties,
+            'hubspot_response' => $response['data'] ?? [],
+        ]);
+    }
+
     public function testConnection(): array
     {
         $token = config('hubspot.access_token');
@@ -631,6 +727,15 @@ class HubspotService extends BaseService
         return is_numeric($candidate) ? (int) $candidate : null;
     }
 
+    private function resolveAspelMappingEventId(array $payload): ?int
+    {
+        $candidate = $this->event?->meta['response_mapping_event_id']
+            ?? $this->event?->meta['mapping_event_id']
+            ?? Arr::get($payload, 'source_event_id');
+
+        return is_numeric($candidate) ? (int) $candidate : null;
+    }
+
     /**
      * @return array<string, scalar|null>
      */
@@ -691,6 +796,52 @@ class HubspotService extends BaseService
         return null;
     }
 
+    /**
+     * @return array<string, scalar|null>
+     */
+    private function buildHubspotContactPropertiesFromSource(?int $mappingEventId, array $sourceData): array
+    {
+        if (! $mappingEventId) {
+            return [];
+        }
+
+        $mappingEvent = Event::query()
+            ->with(['propertyRelationships.property', 'propertyRelationships.relatedProperty'])
+            ->find($mappingEventId);
+
+        if (! $mappingEvent) {
+            return [];
+        }
+
+        $properties = [];
+        $nestedData = Arr::get($sourceData, 'data', []);
+
+        $relationships = $mappingEvent->propertyRelationships
+            ->filter(static fn (PropertyRelationship $relationship): bool => (bool) $relationship->active);
+
+        foreach ($relationships as $relationship) {
+            $hubspotKey = $relationship->property?->key ?: $relationship->property?->name;
+            $sourceKey = $relationship->relatedProperty?->key ?: $relationship->relatedProperty?->name;
+
+            if (! is_string($hubspotKey) || trim($hubspotKey) === '' || ! is_string($sourceKey) || trim($sourceKey) === '') {
+                continue;
+            }
+
+            $value = $this->firstMappedValue([
+                Arr::get($sourceData, $sourceKey),
+                Arr::get($nestedData, $sourceKey),
+            ]);
+
+            if ($value === null) {
+                continue;
+            }
+
+            $properties[$hubspotKey] = $this->normalizeHubspotPropertyValue($value);
+        }
+
+        return $properties;
+    }
+
     private function normalizeHubspotPropertyValue(mixed $value): mixed
     {
         if (is_scalar($value) || $value === null) {
@@ -725,6 +876,7 @@ class HubspotService extends BaseService
 
         return match ($method) {
             'syncContactExecutionResponse' => 'write-back a HubSpot',
+            'syncAspelContactToHubspot' => 'sincronizacion de ASPEL a HubSpot',
             'updateObject' => 'actualizacion de contacto en HubSpot',
             'createObject' => 'creacion de contacto en HubSpot',
             default => 'sincronizacion de contacto',
@@ -773,6 +925,40 @@ class HubspotService extends BaseService
         ];
     }
 
+    /**
+     * @return array<string, scalar|null>
+     */
+    private function buildAspelInboundAuditProperties(array $payload, array $sourceData): array
+    {
+        $properties = [
+            'last_sync_aspel' => now()->toISOString(),
+            'sync_status_aspel' => 'success',
+            'last_error_aspel' => '',
+        ];
+
+        $clave = $this->resolveScalarPayloadValue([
+            Arr::get($payload, 'clave'),
+            Arr::get($sourceData, 'clave'),
+            Arr::get($sourceData, 'CLAVE'),
+        ]);
+        if ($clave !== null) {
+            $properties['clave'] = $clave;
+        }
+
+        $versionSinc = $this->resolveScalarPayloadValue([
+            Arr::get($payload, 'versionSinc'),
+            Arr::get($sourceData, 'versionSinc'),
+            Arr::get($sourceData, 'version_sinc'),
+            Arr::get($sourceData, 'VERSION_SINC'),
+        ]);
+        $versionPropertyKey = $this->resolveHubspotVersionSincPropertyKey();
+        if ($versionSinc !== null && $versionPropertyKey !== null) {
+            $properties[$versionPropertyKey] = $versionSinc;
+        }
+
+        return $properties;
+    }
+
     private function resolveTargetPlatformKey(array $payload): ?string
     {
         $candidates = [
@@ -801,6 +987,132 @@ class HubspotService extends BaseService
         }
 
         return 'sync_to_' . $targetPlatform;
+    }
+
+    private function resolveHubspotVersionSincPropertyKey(): ?string
+    {
+        $configured = $this->event?->meta['version_sinc_property'] ?? null;
+        if (is_string($configured) && trim($configured) !== '') {
+            return trim($configured);
+        }
+
+        $property = Property::query()
+            ->where('platform_id', $this->platform->id)
+            ->where(function ($query): void {
+                $query->where('key', 'version_sinc_aspel')
+                    ->orWhere('name', 'version_sinc_aspel');
+            })
+            ->first();
+
+        if (! $property) {
+            return null;
+        }
+
+        return $property->key ?: $property->name;
+    }
+
+    private function resolveScalarPayloadValue(array $candidates): ?string
+    {
+        foreach ($candidates as $candidate) {
+            if (! is_scalar($candidate)) {
+                continue;
+            }
+
+            $value = trim((string) $candidate);
+            if ($value !== '') {
+                return $value;
+            }
+        }
+
+        return null;
+    }
+
+    private function findHubspotContactForAspelPayload(array $payload, array $sourceData): array
+    {
+        $strategies = [
+            'clave' => $this->resolveScalarPayloadValue([
+                Arr::get($payload, 'clave'),
+                Arr::get($sourceData, 'clave'),
+                Arr::get($sourceData, 'CLAVE'),
+            ]),
+            'rfc' => $this->resolveScalarPayloadValue([
+                Arr::get($payload, 'rfc'),
+                Arr::get($sourceData, 'rfc'),
+            ]),
+            'phone' => $this->resolveScalarPayloadValue([
+                Arr::get($payload, 'phone'),
+                Arr::get($sourceData, 'phone'),
+                Arr::get($sourceData, 'telefono'),
+            ]),
+            'email' => $this->resolveScalarPayloadValue([
+                Arr::get($payload, 'email'),
+                Arr::get($sourceData, 'email'),
+                Arr::get($sourceData, 'emailEnvio'),
+            ]),
+        ];
+
+        foreach ($strategies as $propertyName => $value) {
+            if ($value === null) {
+                continue;
+            }
+
+            $response = $this->hubspotApi->searchObjectByProperty('contacts', $propertyName, $value, [
+                'email',
+                'phone',
+                'rfc',
+                'clave',
+            ]);
+
+            if (! ($response['success'] ?? false)) {
+                return [
+                    'success' => false,
+                    'message' => 'Failed to search HubSpot contact for ASPEL change.',
+                    'data' => [
+                        'match_property' => $propertyName,
+                        'match_value' => $value,
+                        'error' => $response['error'] ?? null,
+                    ],
+                ];
+            }
+
+            $results = Arr::get($response, 'data.results', []);
+            if (! is_array($results)) {
+                $results = [];
+            }
+
+            if (count($results) > 1) {
+                return [
+                    'success' => false,
+                    'message' => 'Multiple HubSpot contacts matched ASPEL change.',
+                    'data' => [
+                        'match_property' => $propertyName,
+                        'match_value' => $value,
+                        'matches' => array_map(
+                            static fn (array $result): array => [
+                                'id' => $result['id'] ?? null,
+                                'properties' => $result['properties'] ?? [],
+                            ],
+                            $results
+                        ),
+                    ],
+                ];
+            }
+
+            if (count($results) === 1) {
+                return [
+                    'success' => true,
+                    'found' => true,
+                    'contact_id' => (string) ($results[0]['id'] ?? ''),
+                    'matched_by' => $propertyName,
+                ];
+            }
+        }
+
+        return [
+            'success' => true,
+            'found' => false,
+            'matched_by' => null,
+        ];
     }
 
     /**

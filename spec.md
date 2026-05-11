@@ -1,7 +1,7 @@
 # spec.md
 
 Sistema: INTEGRADOR - Sistema de Integracion Multiplataforma
-Version: 1.1.3
+Version: 1.1.4
 Estado: LOCKED
 Tipo: Especificacion Oficial del Sistema
 
@@ -443,6 +443,55 @@ Las siguientes capacidades existen en `/Users/hint/laravel-sites/integrador` y D
   - `sync_to_odoo`, `sync_status_odoo`, `last_sync_odoo`, `odoo_id`, `last_error_odoo`
   - `sync_to_netsuite`, `sync_status_netsuite`, `last_sync_netsuite`, `netsuite_id`, `last_error_netsuite`
 - Para plataformas implementadas temporalmente mediante `generic.external.call`, el patron de propiedad de control sigue siendo valido y debe coexistir con el contrato HTTP normalizado.
+
+## 9.6.3 Polling de Contactos ASPEL -> HubSpot por `VERSION_SINC`
+
+- El sistema DEBE soportar sincronizacion programada de contactos modificados en ASPEL SAE mediante polling por cursor persistente.
+- El contrato minimo esperado de ASPEL es:
+  - `GET /api/contacts/changes?sinceTs={isoDateTime}&sinceClave={clave}&take={n}`
+  - `GET /api/contacts/{clave}`
+- El endpoint `changes` DEBE tratarse como fuente oficial de:
+  - cursor (`nextSinceTs`, `nextSinceClave`)
+  - idempotencia (`clave + versionSinc`)
+  - paginacion (`hasMore`)
+- El flujo canonico DEBE ser:
+  1. evento `schedule` en ASPEL con `method_name = getUpdatedContacts`
+  2. carga de cursor persistente desde `configs`
+  3. consumo paginado de `changes`
+  4. fetch de detalle completo por `clave`
+  5. evento siguiente en HubSpot con `method_name = syncAspelContactToHubspot`
+  6. update o create del contacto HubSpot segun matching
+  7. persistencia del cursor solo cuando el batch completo termina con exito
+- El cursor persistente DEBE usar estas claves:
+  - `aspel.contacts.cursor.<event_id>.since_ts`
+  - `aspel.contacts.cursor.<event_id>.since_clave`
+  - `aspel.contacts.cursor.<event_id>.last_run_started_at`
+  - `aspel.contacts.cursor.<event_id>.last_run_finished_at`
+  - `aspel.contacts.cursor.<event_id>.last_run_status`
+  - `aspel.contacts.cursor.<event_id>.last_error`
+- Defaults del primer arranque:
+  - `sinceTs = now - 24h`
+  - `sinceClave = ""`
+- Regla critica:
+  - si falla cualquier item del batch, el cursor NO debe avanzar
+  - si `hasMore = true`, el mismo run debe seguir procesando inmediatamente
+- Matching hacia HubSpot DEBE seguir este orden:
+  1. `clave`
+  2. `rfc`
+  3. `phone`
+  4. `email`
+- Si no encuentra contacto en HubSpot, el sistema DEBE crearlo.
+- Si encuentra multiples coincidencias para una misma llave, el sistema DEBE detener la operacion de ese item, registrar el contexto en `Record.details` y NO actualizar automaticamente.
+- El flujo ASPEL -> HubSpot NO debe reutilizar `sync_to_aspel` ni disparar el trigger manual HubSpot -> ASPEL.
+- El update/create exitoso en HubSpot DEBE escribir propiedades tecnicas minimas:
+  - `clave`
+  - `last_sync_aspel`
+  - `sync_status_aspel = success`
+  - `last_error_aspel = ''`
+  - propiedad de auditoria para `versionSinc`, si existe en HubSpot
+- Mejora objetivo recomendada para la API de ASPEL:
+  - incluir `versionSinc` tambien en `GET /api/contacts/{clave}`
+  - normalizar timestamps de `changes` a UTC explicito
 
 ## 9.7 Validacion y Actualizacion Inteligente de Entidades
 

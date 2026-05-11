@@ -81,6 +81,10 @@ class ExecuteEventJob implements ShouldQueue
                 'record' => $record,
             ]);
             $result = $this->invokeServiceMethod($service, $methodName, $payload, $record);
+            $this->mergeRecordDetails($record, [
+                'service_output' => Arr::get($result, 'data', []),
+                'service_message' => Arr::get($result, 'message'),
+            ]);
 
             if (Arr::get($result, 'status') === 'warning') {
                 $eventLoggingService->logEventWarning(
@@ -158,5 +162,14 @@ class ExecuteEventJob implements ShouldQueue
         }
 
         return $payload;
+    }
+
+    private function mergeRecordDetails(Record $record, array $details): void
+    {
+        $existingDetails = is_array($record->details) ? $record->details : [];
+
+        $record->update([
+            'details' => array_replace_recursive($existingDetails, $details),
+        ]);
     }
 }

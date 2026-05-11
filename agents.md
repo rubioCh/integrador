@@ -1,8 +1,8 @@
 # agents.md
 
 Proyecto: INTEGRADOR - Sistema de Integracion Multiplataforma (Laravel 11 + Inertia)
-Basado en: spec.md v1.1.3
-Version: 1.4
+Basado en: spec.md v1.1.4
+Version: 1.5
 Estado: ACTIVE
 
 ---
@@ -32,6 +32,7 @@ Construir un sistema de integración multiplataforma que sincronice datos entre 
 10. Mantener y ejecutar seeder obligatorio de superadmin bootstrap.
 11. En errores de sincronización de contactos relacionados con HubSpot, intentar registrar una nota visible en el objeto HubSpot afectado y guardar el resultado en `Record.details.hubspot_note`.
 12. Modelar sincronizaciones manuales/controladas por plataforma usando propiedades técnicas `sync_to_{platform}` y write-back de estado técnico en HubSpot.
+13. Soportar polling programado de contactos ASPEL -> HubSpot con cursor persistente, idempotencia por `clave + versionSinc` y matching por `clave`, `rfc`, `phone`, `email`.
 
 ### 2.4 Límites
 1. No inventar endpoints, credenciales o comportamientos no descritos.
@@ -41,6 +42,7 @@ Construir un sistema de integración multiplataforma que sincronice datos entre 
 5. No procesar eventos síncronamente cuando puedan ser Jobs asíncronos.
 6. No usar el id técnico de HubSpot como propiedad mapeada editable; debe viajar como contexto técnico del flujo.
 7. No disparar sincronizaciones de negocio por cambios en propiedades técnicas de write-back (`{platform}_id`, `last_sync_{platform}`, `sync_status_{platform}`, `last_error_{platform}`).
+8. No avanzar cursores persistentes de polling si falla cualquier item del batch o el detalle de ASPEL.
 
 ### 2.5 Herramientas permitidas
 1. Laravel 11 Framework.
@@ -97,6 +99,7 @@ Si falta información, detente y pide aclaración. Convierte eventos que puedan 
 - Admin UI protegido con roles/permisos.
 - Seeder bootstrap de `superadmin` obligatorio.
 - Notas operativas de fallo en contactos HubSpot con resultado almacenado en `Record.details.hubspot_note`.
+- Polling programado de contactos ASPEL con cursor persistente en `configs`, detalle por `clave` y sincronización create/update hacia HubSpot.
 
 ---
 
@@ -358,6 +361,7 @@ Models
 - Write-back de respuesta: cuando un flujo genérico exitoso encadene de regreso a HubSpot, el siguiente evento debe tomar como base `destination_response.data` más contexto técnico mínimo (`hubspot_object_id`, `source_event_id`, etc.), evitando reutilizar el payload completo del evento anterior.
 - Propiedades técnicas por plataforma: para HubSpot -> plataforma externa, se debe favorecer el patrón `sync_to_{platform}`, `sync_status_{platform}`, `last_sync_{platform}`, `{platform}_id`, `last_error_{platform}`.
 - Triggers por plataforma: el disparo de sincronización controlada debe configurarse sobre `sync_to_{platform} = pending`, no sobre cada propiedad de negocio individual.
+- Polling ASPEL -> HubSpot: el flujo programado debe usar `sinceTs` y `sinceClave` persistidos en `configs`, idempotencia por `clave + versionSinc`, fetch de detalle por `GET /api/contacts/{clave}`, matching HubSpot en orden `clave -> rfc -> phone -> email`, y create cuando no exista coincidencia.
 
 ## 8) Contratos clave (Interfaces)
 ### 8.1 EventProcessingService
