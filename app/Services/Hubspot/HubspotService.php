@@ -96,14 +96,39 @@ class HubspotService extends BaseService
     public function createProducts(array $products): array
     {
         if (empty($products)) {
-            return $this->success('No products received for creation.', ['count' => 0]);
+            return $this->success('No products received for creation.', [
+                'count' => 0,
+                'created_count' => 0,
+                'error_count' => 0,
+                'errors' => [],
+                'output_payload' => [],
+            ]);
         }
 
         $created = [];
         $errors = [];
+        $outputPayload = [];
 
         foreach ($products as $index => $product) {
-            $result = $this->hubspotApi->createProduct(is_array($product) ? $product : []);
+            if (! is_array($product)) {
+                $errors[] = [
+                    'index' => $index,
+                    'error' => 'Invalid product payload.',
+                ];
+                continue;
+            }
+
+            $validation = $this->validateProductPayload($product);
+            if ($validation !== null) {
+                $errors[] = [
+                    'index' => $index,
+                    'error' => $validation,
+                ];
+                continue;
+            }
+
+            $payload = $this->sanitizeProductPayload($product);
+            $result = $this->hubspotApi->createProduct($payload);
 
             if (! $result['success']) {
                 $errors[] = [
@@ -114,6 +139,9 @@ class HubspotService extends BaseService
             }
 
             $created[] = $result['data'];
+            $outputPayload[] = array_merge($payload, [
+                'hubspot_id' => Arr::get($result, 'data.id'),
+            ]);
         }
 
         if (! empty($created)) {
@@ -121,14 +149,16 @@ class HubspotService extends BaseService
         }
 
         return [
-            'success' => empty($errors),
+            'success' => empty($errors) || ! empty($created),
+            'status' => empty($errors) ? null : 'warning',
             'message' => empty($errors)
                 ? 'Products created successfully in HubSpot.'
-                : 'Some products failed to create in HubSpot.',
+                : (! empty($created) ? 'Some products failed to create in HubSpot.' : 'Products could not be created in HubSpot.'),
             'data' => [
                 'created_count' => count($created),
                 'error_count' => count($errors),
                 'errors' => $errors,
+                'output_payload' => $outputPayload,
             ],
         ];
     }
@@ -136,11 +166,21 @@ class HubspotService extends BaseService
     public function updateProducts(array $updateProducts): array
     {
         if (empty($updateProducts)) {
-            return $this->success('No products received for update.', ['count' => 0]);
+            return $this->success('No products received for update.', [
+                'count' => 0,
+                'updated_count' => 0,
+                'error_count' => 0,
+                'not_found_count' => 0,
+                'errors' => [],
+                'not_found' => [],
+                'output_payload' => [],
+            ]);
         }
 
         $updated = [];
         $errors = [];
+        $notFound = [];
+        $nextEventConfigured = $this->event?->to_event_id !== null;
 
         foreach ($updateProducts as $index => $product) {
             if (! is_array($product)) {
@@ -148,14 +188,49 @@ class HubspotService extends BaseService
                 continue;
             }
 
-            $productId = (string) ($product['id'] ?? $product['hubspot_id'] ?? '');
+            $validation = $this->validateProductPayload($product);
+            if ($validation !== null) {
+                $errors[] = [
+                    'index' => $index,
+                    'error' => $validation,
+                ];
+                continue;
+            }
+
+            $payload = $this->sanitizeProductPayload($product);
+            $productId = (string) ($payload['id'] ?? $payload['hubspot_id'] ?? '');
+            if ($productId === '') {
+                $resolved = $this->resolveHubspotProductId($payload);
+
+                if (($resolved['match_status'] ?? null) === 'not_found') {
+                    $notFound[] = $payload;
+                    continue;
+                }
+
+                if (($resolved['success'] ?? false) !== true) {
+                    $errors[] = [
+                        'index' => $index,
+                        'error' => $resolved['message'] ?? 'Unable to resolve HubSpot product id.',
+                        'details' => $resolved['error'] ?? null,
+                        'criteria_attempted' => $resolved['criteria_attempted'] ?? [],
+                    ];
+                    continue;
+                }
+
+                $productId = (string) ($resolved['hubspot_id'] ?? '');
+            }
+
             if ($productId === '') {
                 $errors[] = ['index' => $index, 'error' => 'Missing HubSpot product id.'];
                 continue;
             }
 
-            $properties = $product;
-            unset($properties['id'], $properties['hubspot_id']);
+            $properties = $payload;
+            unset(
+                $properties['id'],
+                $properties['hubspot_id'],
+                $properties['_event_metadata']
+            );
 
             $result = $this->hubspotApi->updateProduct($productId, $properties);
             if (! $result['success']) {
@@ -167,24 +242,144 @@ class HubspotService extends BaseService
                 continue;
             }
 
-            $updated[] = $result['data'];
+            $updated[] = array_merge($properties, [
+                'hubspot_id' => $productId,
+                'hubspot_response_id' => Arr::get($result, 'data.id'),
+            ]);
         }
 
         if (! empty($updated)) {
             $this->productCacheService->preload($updateProducts);
         }
 
+        $warningReason = null;
+        if (! empty($notFound) && ! $nextEventConfigured) {
+            $warningReason = 'missing_create_fallback_event';
+        }
+
         return [
-            'success' => empty($errors),
-            'message' => empty($errors)
-                ? 'Products updated successfully in HubSpot.'
-                : 'Some products failed to update in HubSpot.',
+            'success' => empty($errors) || ! empty($updated) || ! empty($notFound),
+            'status' => (! empty($errors) || $warningReason !== null) ? 'warning' : null,
+            'message' => $this->buildProductUpdateMessage($updated, $notFound, $errors, $warningReason),
             'data' => [
                 'updated_count' => count($updated),
                 'error_count' => count($errors),
+                'not_found_count' => count($notFound),
                 'errors' => $errors,
+                'not_found' => $notFound,
+                'warning_reason' => $warningReason,
+                'output_payload' => $notFound,
             ],
         ];
+    }
+
+    private function resolveHubspotProductId(array $product): array
+    {
+        $criteria = [
+            ['property' => 'identificador_db', 'value' => $product['identificador_db'] ?? null],
+            ['property' => 'sku', 'value' => $product['sku'] ?? null],
+        ];
+
+        $attempted = [];
+
+        foreach ($criteria as $criterion) {
+            $property = trim((string) ($criterion['property'] ?? ''));
+            $value = $criterion['value'] ?? null;
+
+            if ($property === '' || ! is_scalar($value) || trim((string) $value) === '') {
+                continue;
+            }
+
+            $attempted[] = [
+                'property' => $property,
+                'value' => trim((string) $value),
+            ];
+
+            $response = $this->hubspotApi->searchObjectByProperty('products', $property, (string) $value, [$property]);
+
+            if (! ($response['success'] ?? false)) {
+                return [
+                    'success' => false,
+                    'match_status' => 'failed',
+                    'message' => 'HubSpot product search failed.',
+                    'criteria_attempted' => $attempted,
+                    'error' => $response['error'] ?? null,
+                ];
+            }
+
+            $results = Arr::get($response, 'data.results', []);
+            if (! is_array($results) || count($results) === 0) {
+                continue;
+            }
+
+            if (count($results) > 1) {
+                return [
+                    'success' => false,
+                    'match_status' => 'failed',
+                    'message' => 'Multiple HubSpot products matched the provided identifiers.',
+                    'criteria_attempted' => $attempted,
+                ];
+            }
+
+            return [
+                'success' => true,
+                'match_status' => 'matched',
+                'hubspot_id' => (string) Arr::get($results, '0.id'),
+                'criteria_attempted' => $attempted,
+            ];
+        }
+
+        return [
+            'success' => false,
+            'match_status' => 'not_found',
+            'message' => 'HubSpot product not found using configured match criteria.',
+            'criteria_attempted' => $attempted,
+        ];
+    }
+
+    private function sanitizeProductPayload(array $product): array
+    {
+        unset($product['_event_metadata']);
+
+        return $product;
+    }
+
+    private function validateProductPayload(array $product): ?string
+    {
+        $identifier = trim((string) ($product['identificador_db'] ?? ''));
+        $sku = trim((string) ($product['sku'] ?? ''));
+
+        if ($identifier === '' && $sku === '') {
+            return 'Product payload requires identificador_db or sku.';
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  list<array<string, mixed>>  $updated
+     * @param  list<array<string, mixed>>  $notFound
+     * @param  list<array<string, mixed>>  $errors
+     */
+    private function buildProductUpdateMessage(array $updated, array $notFound, array $errors, ?string $warningReason): string
+    {
+        if ($warningReason === 'missing_create_fallback_event') {
+            return 'Some products were not found in HubSpot and no creation fallback event is configured.';
+        }
+
+        if (! empty($errors) && ! empty($updated)) {
+            return 'Some products failed to update in HubSpot.';
+        }
+
+        if (! empty($errors) && empty($updated) && empty($notFound)) {
+            return 'Products could not be updated in HubSpot.';
+        }
+
+        if (! empty($notFound)) {
+            return 'Products prepared for creation fallback.';
+        }
+
+        return 'Products updated successfully in HubSpot.';
     }
 
     public function getSignedQuotes(): array

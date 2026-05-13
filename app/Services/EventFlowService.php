@@ -236,6 +236,27 @@ class EventFlowService
 
     private function transformDataForEvent(Event $event, array $data): array
     {
+        if (array_is_list($data) && $this->isListOfArrays($data)) {
+            return array_map(
+                fn (array $item): array => $this->transformDataItemForEvent($event, $item),
+                $data
+            );
+        }
+
+        $transformed = $this->transformDataItemForEvent($event, $data);
+
+        $transformed['_event_metadata'] = [
+            'event_id' => $event->id,
+            'event_name' => $event->name,
+            'platform' => $event->platform?->type,
+            'transformed_at' => now()->toISOString(),
+        ];
+
+        return $transformed;
+    }
+
+    private function transformDataItemForEvent(Event $event, array $data): array
+    {
         $transformed = $data;
 
         $relationships = $event->propertyRelationships()->with(['property', 'relatedProperty'])->get();
@@ -267,14 +288,21 @@ class EventFlowService
             data_set($transformed, $targetKey, $transformedValue);
         }
 
-        $transformed['_event_metadata'] = [
-            'event_id' => $event->id,
-            'event_name' => $event->name,
-            'platform' => $event->platform?->type,
-            'transformed_at' => now()->toISOString(),
-        ];
-
         return $transformed;
+    }
+
+    /**
+     * @param  array<int|string, mixed>  $data
+     */
+    private function isListOfArrays(array $data): bool
+    {
+        foreach ($data as $item) {
+            if (! is_array($item)) {
+                return false;
+            }
+        }
+
+        return ! empty($data);
     }
 
     private function castValue(mixed $value, ?string $type): mixed

@@ -34,6 +34,7 @@ class AzureSqlService extends BaseService
             'kcp_grcor_taxpackagingqty',
             'unitid',
             'Inventario',
+            'modifieddatetime',
         ],
         'custtable' => [
             'accountnum',
@@ -75,6 +76,7 @@ class AzureSqlService extends BaseService
     ) {
         parent::__construct($platform, $event, $record);
 
+        $this->applyHubspotRuntimeConfig();
         $this->hubspotApi ??= app(HubspotApiServiceRefactored::class);
     }
 
@@ -110,10 +112,12 @@ class AzureSqlService extends BaseService
 
     public function syncProducts(array $payload = []): array
     {
+        $defaultQuery = $this->buildProductsDefaultQuery($payload);
+
         return $this->syncTable(
             table: 'inventtable',
             hubspotObjectType: 'products',
-            defaultQuery: 'SELECT * FROM [dbo].[inventtable]',
+            defaultQuery: $defaultQuery,
             payload: $payload,
             criteriaResolver: function (array $row): array {
                 $identifier = $this->stringValue($row['itemid'] ?? null);
@@ -168,6 +172,10 @@ class AzureSqlService extends BaseService
 
     private function syncTable(string $table, string $hubspotObjectType, string $defaultQuery, array $payload, callable $criteriaResolver): array
     {
+        if ($this->shouldPrepareBatchOutput($hubspotObjectType)) {
+            return $this->prepareBatchOutput($table, $defaultQuery, $payload);
+        }
+
         $query = trim((string) ($payload['command_sql'] ?? $this->event?->command_sql ?? $defaultQuery));
         $rowsRead = 0;
         $matchedRows = 0;
@@ -175,6 +183,7 @@ class AzureSqlService extends BaseService
         $warningRows = 0;
         $updatedIds = [];
         $warnings = [];
+        $outputPayload = [];
 
         try {
             $rows = $this->fetchRows($query, $table);
@@ -189,6 +198,11 @@ class AzureSqlService extends BaseService
         }
 
         foreach ($rows as $index => $row) {
+            $preparedRow = $this->buildHubspotPayload($table, $row);
+            if (! empty($preparedRow)) {
+                $outputPayload[] = $preparedRow;
+            }
+
             $match = $this->findHubspotMatch($hubspotObjectType, $criteriaResolver($row));
 
             if (! ($match['success'] ?? false)) {
@@ -197,13 +211,14 @@ class AzureSqlService extends BaseService
                     'row' => $index,
                     'reason' => $match['message'] ?? 'match_not_found',
                     'criteria' => $match['criteria_attempted'] ?? [],
+                    'error' => $match['error'] ?? null,
                 ];
                 continue;
             }
 
             $matchedRows++;
 
-            $properties = $this->buildHubspotPayload($table, $row);
+            $properties = $preparedRow;
             if (empty($properties)) {
                 $warningRows++;
                 $warnings[] = [
@@ -239,6 +254,8 @@ class AzureSqlService extends BaseService
         $details = [
             'table' => $table,
             'query' => $query,
+            'sync_window_hours' => $table === 'inventtable' ? $this->resolveSyncWindowHours($payload) : null,
+            'modified_filter_column' => $table === 'inventtable' ? 'modifieddatetime' : null,
             'rows_read' => $rowsRead,
             'rows_matched' => $matchedRows,
             'rows_updated' => $updatedRows,
@@ -246,7 +263,12 @@ class AzureSqlService extends BaseService
             'hubspot_updated_ids' => $updatedIds,
             'warnings' => $warnings,
             'connection' => $this->sanitizedConnectionDetails(),
+            'output_payload' => $outputPayload,
         ];
+
+        if ($details['sync_window_hours'] === null) {
+            unset($details['sync_window_hours'], $details['modified_filter_column']);
+        }
 
         $this->mergeRecordDetails($details);
 
@@ -273,6 +295,95 @@ class AzureSqlService extends BaseService
             'message' => sprintf('Azure SQL sync finished for %s.', $table),
             'data' => $details,
         ];
+    }
+
+    private function prepareBatchOutput(string $table, string $defaultQuery, array $payload): array
+    {
+        $query = trim((string) ($payload['command_sql'] ?? $this->event?->command_sql ?? $defaultQuery));
+
+        try {
+            $rows = $this->fetchRows($query, $table);
+        } catch (\Throwable $exception) {
+            return $this->failureResult(
+                'Azure SQL query failed.',
+                $table,
+                $query,
+                $exception
+            );
+        }
+
+        $outputPayload = [];
+        $warningRows = [];
+
+        foreach ($rows as $index => $row) {
+            $mappedRow = $this->buildHubspotPayload($table, $row);
+
+            if (empty($mappedRow)) {
+                $warningRows[] = [
+                    'row' => $index,
+                    'reason' => 'no_updatable_properties',
+                ];
+                continue;
+            }
+
+            if (! $this->isValidProductOutputPayload($mappedRow)) {
+                $warningRows[] = [
+                    'row' => $index,
+                    'reason' => 'invalid_output_payload',
+                ];
+                continue;
+            }
+
+            $outputPayload[] = $mappedRow;
+        }
+
+        $details = [
+            'table' => $table,
+            'query' => $query,
+            'sync_window_hours' => $table === 'inventtable' ? $this->resolveSyncWindowHours($payload) : null,
+            'modified_filter_column' => $table === 'inventtable' ? 'modifieddatetime' : null,
+            'rows_read' => count($rows),
+            'rows_prepared' => count($outputPayload),
+            'rows_warning' => count($warningRows),
+            'warnings' => $warningRows,
+            'connection' => $this->sanitizedConnectionDetails(),
+            'dispatch_mode' => 'next_event',
+            'next_event_id' => $this->event?->to_event_id,
+            'output_payload_count' => count($outputPayload),
+            'output_payload_sample' => array_slice($outputPayload, 0, 3),
+            'hubspot_runtime_platform' => $this->resolveHubspotRuntimePlatform()?->only(['id', 'name', 'slug', 'type']),
+        ];
+
+        if ($details['sync_window_hours'] === null) {
+            unset($details['sync_window_hours'], $details['modified_filter_column']);
+        }
+
+        $this->mergeRecordDetails($details);
+
+        if (count($outputPayload) === 0) {
+            return [
+                'success' => true,
+                'status' => 'warning',
+                'message' => sprintf('Azure SQL sync finished for %s without records prepared for the next event.', $table),
+                'data' => $details + ['output_payload' => []],
+            ];
+        }
+
+        return [
+            'success' => true,
+            'message' => sprintf('Azure SQL sync prepared %d records for %s.', count($outputPayload), $table),
+            'data' => $details + ['output_payload' => $outputPayload],
+        ];
+    }
+
+    private function buildProductsDefaultQuery(array $payload): string
+    {
+        $windowHours = $this->resolveSyncWindowHours($payload);
+
+        return sprintf(
+            'SELECT * FROM [dbo].[inventtable] WHERE [modifieddatetime] >= DATEADD(MINUTE, -%d, GETDATE()) ORDER BY [modifieddatetime] ASC',
+            $windowHours
+        );
     }
 
     /**
@@ -357,6 +468,7 @@ class AzureSqlService extends BaseService
                     'success' => false,
                     'message' => 'hubspot_search_failed',
                     'criteria_attempted' => $attempted,
+                    'status_code' => $response['status_code'] ?? null,
                     'error' => $response['error'] ?? null,
                 ];
             }
@@ -482,12 +594,37 @@ class AzureSqlService extends BaseService
         return $normalized === '' ? null : $normalized;
     }
 
+    private function resolveSyncWindowHours(array $payload, int $default = 24): int
+    {
+        $meta = is_array($this->event?->meta) ? $this->event->meta : [];
+        $candidate = $payload['sync_window_hours'] ?? $meta['sync_window_hours'] ?? $default;
+
+        if (is_numeric($candidate)) {
+            $hours = (int) $candidate;
+
+            if ($hours > 0) {
+                return $hours;
+            }
+        }
+
+        return $default;
+    }
+
+    private function isValidProductOutputPayload(array $payload): bool
+    {
+        $identifier = trim((string) ($payload['identificador_db'] ?? ''));
+        $sku = trim((string) ($payload['sku'] ?? ''));
+
+        return $identifier !== '' || $sku !== '';
+    }
+
     private function failureResult(string $message, string $table, string $query, \Throwable $exception): array
     {
         $details = [
             'table' => $table,
             'query' => $query,
             'connection' => $this->sanitizedConnectionDetails(),
+            'hubspot_runtime_platform' => $this->resolveHubspotRuntimePlatform()?->only(['id', 'name', 'slug', 'type']),
             'error' => [
                 'exception' => get_class($exception),
                 'message' => $exception->getMessage(),
@@ -531,5 +668,65 @@ class AzureSqlService extends BaseService
         $this->record->update([
             'details' => array_replace_recursive($existing, $details),
         ]);
+    }
+
+    private function shouldPrepareBatchOutput(string $hubspotObjectType): bool
+    {
+        $nextEvent = $this->event?->to_event;
+
+        if (! $nextEvent) {
+            return false;
+        }
+
+        if (($nextEvent->platform?->type ?? null) !== 'hubspot') {
+            return false;
+        }
+
+        return $hubspotObjectType === 'products' && $nextEvent->event_type_id === 'product.updated';
+    }
+
+    private function applyHubspotRuntimeConfig(): void
+    {
+        $hubspotPlatform = $this->resolveHubspotRuntimePlatform();
+        if (! $hubspotPlatform) {
+            return;
+        }
+
+        $credentials = is_array($hubspotPlatform->credentials) ? $hubspotPlatform->credentials : [];
+        $settings = is_array($hubspotPlatform->settings) ? $hubspotPlatform->settings : [];
+        $overrides = [];
+
+        $token = $credentials['access_token'] ?? $credentials['api_token'] ?? null;
+        if (is_string($token) && trim($token) !== '') {
+            $overrides['hubspot.access_token'] = $token;
+        }
+
+        $baseUrl = $settings['base_url'] ?? null;
+        if (is_string($baseUrl) && trim($baseUrl) !== '') {
+            $overrides['hubspot.base_url'] = $baseUrl;
+        }
+
+        $timeout = $settings['timeout_seconds'] ?? null;
+        if (is_numeric($timeout)) {
+            $overrides['hubspot.timeout_seconds'] = (int) $timeout;
+        }
+
+        if (! empty($overrides)) {
+            config($overrides);
+        }
+    }
+
+    private function resolveHubspotRuntimePlatform(): ?Platform
+    {
+        if (($this->platform->type ?? null) === 'hubspot') {
+            return $this->platform;
+        }
+
+        $nextPlatform = $this->event?->to_event?->platform;
+        if ($nextPlatform instanceof Platform && $nextPlatform->type === 'hubspot') {
+            return $nextPlatform;
+        }
+
+        return null;
     }
 }

@@ -64,10 +64,12 @@ class EventLoggingService
 
     public function logEventWarning(Record $record, string $message, array $details = []): void
     {
+        $existingDetails = is_array($record->details) ? $record->details : [];
+
         $record->update([
             'status' => 'warning',
             'message' => $message,
-            'details' => empty($details) ? null : $details,
+            'details' => empty($details) ? $existingDetails : array_replace_recursive($existingDetails, $details),
         ]);
     }
 

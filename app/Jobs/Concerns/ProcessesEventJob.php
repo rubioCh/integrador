@@ -74,6 +74,7 @@ trait ProcessesEventJob
         }
 
         $result = $this->invokeService($service, $methodName, $data, $event, $record);
+        $outputPayload = $this->resolveOutputPayload($result, $data);
 
         if (! Arr::get($result, 'success', false)) {
             $message = Arr::get($result, 'message', 'Event processing failed.');
@@ -81,6 +82,7 @@ trait ProcessesEventJob
             $this->mergeRecordDetails($record, [
                 'service_output' => Arr::get($result, 'data', []),
                 'service_message' => Arr::get($result, 'message'),
+                'output_payload' => $outputPayload,
             ]);
             $eventLoggingService->logEventError($record, new \Exception($message));
             if (($noteResult['attempted'] ?? false) === true) {
@@ -94,14 +96,48 @@ trait ProcessesEventJob
         $this->mergeRecordDetails($record, [
             'service_output' => Arr::get($result, 'data', []),
             'service_message' => Arr::get($result, 'message'),
-            'output_payload' => Arr::get($result, 'data', []),
+            'output_payload' => $outputPayload,
         ]);
 
-        $eventLoggingService->logEventSuccess($record, Arr::get($result, 'message', 'Event processed.'));
-
-        if ($event->to_event) {
-            ProcessNextEventJob::dispatch($event, $record, $data)->onQueue('events');
+        if (Arr::get($result, 'status') === 'warning') {
+            $eventLoggingService->logEventWarning(
+                $record,
+                Arr::get($result, 'message', 'Event processed with warnings.'),
+                Arr::get($result, 'data', [])
+            );
+        } else {
+            $eventLoggingService->logEventSuccess($record, Arr::get($result, 'message', 'Event processed.'));
         }
+
+        if ($event->to_event && $this->shouldDispatchNextPayload($outputPayload)) {
+            ProcessNextEventJob::dispatch($event, $record, $outputPayload)->onQueue('events');
+        }
+    }
+
+    private function resolveOutputPayload(array $result, array $fallback): array
+    {
+        $outputPayload = Arr::get($result, 'data.output_payload');
+
+        if (is_array($outputPayload)) {
+            return $outputPayload;
+        }
+
+        $data = Arr::get($result, 'data', []);
+
+        return is_array($data) ? $data : $fallback;
+    }
+
+    private function shouldDispatchNextPayload(array $payload): bool
+    {
+        if ($payload === []) {
+            return false;
+        }
+
+        if (array_is_list($payload)) {
+            return count($payload) > 0;
+        }
+
+        return true;
     }
 
     private function invokeService(object $service, string $methodName, array $data, Event $event, Record $record): array

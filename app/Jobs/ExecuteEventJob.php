@@ -13,6 +13,7 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\Log;
+use App\Jobs\ProcessNextEventJob;
 
 class ExecuteEventJob implements ShouldQueue
 {
@@ -81,9 +82,11 @@ class ExecuteEventJob implements ShouldQueue
                 'record' => $record,
             ]);
             $result = $this->invokeServiceMethod($service, $methodName, $payload, $record);
+            $outputPayload = $this->resolveOutputPayload($result, $payload);
             $this->mergeRecordDetails($record, [
                 'service_output' => Arr::get($result, 'data', []),
                 'service_message' => Arr::get($result, 'message'),
+                'output_payload' => $outputPayload,
             ]);
 
             if (Arr::get($result, 'status') === 'warning') {
@@ -102,6 +105,10 @@ class ExecuteEventJob implements ShouldQueue
             }
 
             $eventLoggingService->logEventSuccess($record, Arr::get($result, 'message', 'Scheduled event executed.'));
+
+            if ($this->event->to_event && $this->shouldDispatchNextPayload($outputPayload)) {
+                ProcessNextEventJob::dispatch($this->event, $record, $outputPayload)->onQueue('events');
+            }
 
             $this->event->update(['last_executed_at' => now()]);
         } catch (\Throwable $exception) {
@@ -171,5 +178,31 @@ class ExecuteEventJob implements ShouldQueue
         $record->update([
             'details' => array_replace_recursive($existingDetails, $details),
         ]);
+    }
+
+    private function resolveOutputPayload(array $result, array $fallback): array
+    {
+        $outputPayload = Arr::get($result, 'data.output_payload');
+
+        if (is_array($outputPayload)) {
+            return $outputPayload;
+        }
+
+        $data = Arr::get($result, 'data', []);
+
+        return is_array($data) ? $data : $fallback;
+    }
+
+    private function shouldDispatchNextPayload(array $payload): bool
+    {
+        if ($payload === []) {
+            return false;
+        }
+
+        if (array_is_list($payload)) {
+            return count($payload) > 0;
+        }
+
+        return true;
     }
 }

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Jobs\ExecuteEventJob;
+use App\Jobs\ProcessNextEventJob;
 use App\Models\Event;
 use App\Models\Platform;
 use App\Models\Property;
@@ -14,12 +15,16 @@ use App\Services\Hubspot\HubspotApiServiceRefactored;
 use Illuminate\Database\ConnectionInterface;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Mockery;
 use Tests\TestCase;
 
 class AzureSqlServiceTest extends TestCase
 {
     use RefreshDatabase;
+
+    private const PRODUCTS_DEFAULT_QUERY = 'SELECT * FROM [dbo].[inventtable] WHERE [modifieddatetime] >= DATEADD(MINUTE, -24, GETDATE()) ORDER BY [modifieddatetime] ASC';
+    private const PRODUCTS_48_HOURS_QUERY = 'SELECT * FROM [dbo].[inventtable] WHERE [modifieddatetime] >= DATEADD(MINUTE, -48, GETDATE()) ORDER BY [modifieddatetime] ASC';
 
     protected function tearDown(): void
     {
@@ -44,6 +49,39 @@ class AzureSqlServiceTest extends TestCase
         $this->assertSame(AzureSqlService::class, $serviceClass);
     }
 
+    public function test_azure_sql_service_applies_hubspot_runtime_token_from_next_event_platform(): void
+    {
+        config()->set('hubspot.access_token', null);
+
+        $hubspotPlatform = Platform::query()->create([
+            'name' => 'Hubspot corripio',
+            'slug' => 'hubspot-corripio',
+            'type' => 'hubspot',
+            'credentials' => [
+                'access_token' => 'hubspot-token-from-next-platform',
+            ],
+            'active' => true,
+        ]);
+
+        [$platform, $event] = $this->makeAzureSqlEvent('syncProducts', 'azure_sql.products.sync');
+
+        $nextEvent = Event::query()->create([
+            'platform_id' => $hubspotPlatform->id,
+            'name' => 'Actualización de productos',
+            'event_type_id' => 'product.updated',
+            'type' => 'webhook',
+            'active' => true,
+        ]);
+
+        $event->update([
+            'to_event_id' => $nextEvent->id,
+        ]);
+
+        new AzureSqlService($platform, $event->fresh('to_event.platform'), null, Mockery::mock(HubspotApiServiceRefactored::class));
+
+        $this->assertSame('hubspot-token-from-next-platform', config('hubspot.access_token'));
+    }
+
     public function test_sync_products_uses_identificador_db_then_sku_and_updates_existing_product(): void
     {
         [$platform, $event] = $this->makeAzureSqlEvent('syncProducts', 'azure_sql.products.sync');
@@ -54,7 +92,7 @@ class AzureSqlServiceTest extends TestCase
         $connection = Mockery::mock(ConnectionInterface::class);
         $connection->shouldReceive('select')
             ->once()
-            ->with('SELECT * FROM [dbo].[inventtable]')
+            ->with(self::PRODUCTS_DEFAULT_QUERY)
             ->andReturn([
                 (object) [
                     'itemid' => 'SKU-001',
@@ -85,6 +123,108 @@ class AzureSqlServiceTest extends TestCase
         $this->assertTrue($result['success']);
         $this->assertSame(1, data_get($result, 'data.rows_updated'));
         $this->assertSame(['2001'], data_get($result, 'data.hubspot_updated_ids'));
+        $this->assertSame(24, data_get($result, 'data.sync_window_hours'));
+    }
+
+    public function test_sync_products_prepares_batch_output_when_next_event_is_hubspot_product_update(): void
+    {
+        $hubspotPlatform = Platform::query()->create([
+            'name' => 'Hubspot corripio',
+            'slug' => 'hubspot-corripio',
+            'type' => 'hubspot',
+            'credentials' => [
+                'access_token' => 'token_123',
+            ],
+            'active' => true,
+        ]);
+
+        [$platform, $event] = $this->makeAzureSqlEvent('syncProducts', 'azure_sql.products.sync');
+        $nextEvent = Event::query()->create([
+            'platform_id' => $hubspotPlatform->id,
+            'name' => 'Actualización de productos',
+            'event_type_id' => 'product.updated',
+            'type' => 'webhook',
+            'active' => true,
+        ]);
+
+        $event->update([
+            'to_event_id' => $nextEvent->id,
+        ]);
+
+        $record = $this->makeRecord($event);
+
+        $this->attachRelationship($event, $platform, 'itemid', 'identificador_db');
+        $this->attachRelationship($event, $platform, 'ProductName', 'name');
+        $this->attachRelationship($event, $platform, 'modifieddatetime', 'date_modificacion_db');
+
+        $connection = Mockery::mock(ConnectionInterface::class);
+        $connection->shouldReceive('select')
+            ->once()
+            ->with(self::PRODUCTS_DEFAULT_QUERY)
+            ->andReturn([
+                (object) [
+                    'itemid' => 'SKU-001',
+                    'ProductName' => 'Teclado mecanico',
+                    'modifieddatetime' => '2026-05-13 10:15:00',
+                ],
+            ]);
+
+        DB::shouldReceive('purge')->once()->with('azure_sql_runtime');
+        DB::shouldReceive('connection')->once()->with('azure_sql_runtime')->andReturn($connection);
+
+        $hubspotApi = Mockery::mock(HubspotApiServiceRefactored::class);
+        $hubspotApi->shouldNotReceive('searchObjectByProperty');
+        $hubspotApi->shouldNotReceive('updateObject');
+
+        $service = new AzureSqlService($platform, $event->fresh('to_event.platform'), $record, $hubspotApi);
+        $result = $service->syncProducts();
+
+        $this->assertTrue($result['success']);
+        $this->assertSame(1, data_get($result, 'data.output_payload_count'));
+        $this->assertSame('SKU-001', data_get($result, 'data.output_payload.0.identificador_db'));
+        $this->assertSame('Teclado mecanico', data_get($result, 'data.output_payload.0.name'));
+        $this->assertSame('2026-05-13 10:15:00', data_get($result, 'data.output_payload.0.date_modificacion_db'));
+        $this->assertSame('next_event', data_get($result, 'data.dispatch_mode'));
+    }
+
+    public function test_sync_products_can_use_a_48_hour_modifieddatetime_window(): void
+    {
+        [$platform, $event] = $this->makeAzureSqlEvent('syncProducts', 'azure_sql.products.sync', [
+            'sync_window_hours' => 48,
+        ]);
+        $record = $this->makeRecord($event);
+
+        $this->attachRelationship($event, $platform, 'ProductName', 'name');
+
+        $connection = Mockery::mock(ConnectionInterface::class);
+        $connection->shouldReceive('select')
+            ->once()
+            ->with(self::PRODUCTS_48_HOURS_QUERY)
+            ->andReturn([
+                (object) [
+                    'itemid' => 'SKU-048',
+                    'ProductName' => 'Producto reciente',
+                ],
+            ]);
+
+        DB::shouldReceive('purge')->once()->with('azure_sql_runtime');
+        DB::shouldReceive('connection')->once()->with('azure_sql_runtime')->andReturn($connection);
+
+        $hubspotApi = Mockery::mock(HubspotApiServiceRefactored::class);
+        $hubspotApi->shouldReceive('searchObjectByProperty')
+            ->once()
+            ->with('products', 'identificador_db', 'SKU-048', ['identificador_db'])
+            ->andReturn(['success' => true, 'data' => ['results' => [['id' => '20048']]]]);
+        $hubspotApi->shouldReceive('updateObject')
+            ->once()
+            ->with('products', '20048', ['name' => 'Producto reciente'])
+            ->andReturn(['success' => true, 'data' => ['id' => '20048']]);
+
+        $service = new AzureSqlService($platform, $event, $record, $hubspotApi);
+        $result = $service->syncProducts();
+
+        $this->assertTrue($result['success']);
+        $this->assertSame(48, data_get($result, 'data.sync_window_hours'));
     }
 
     public function test_sync_accounts_skips_hubspot_owned_columns_and_matches_by_email_when_identifier_misses(): void
@@ -181,7 +321,7 @@ class AzureSqlServiceTest extends TestCase
         $connection = Mockery::mock(ConnectionInterface::class);
         $connection->shouldReceive('select')
             ->once()
-            ->with('SELECT * FROM [dbo].[inventtable]')
+            ->with(self::PRODUCTS_DEFAULT_QUERY)
             ->andReturn([]);
 
         DB::shouldReceive('purge')->once()->with('azure_sql_runtime');
@@ -200,7 +340,66 @@ class AzureSqlServiceTest extends TestCase
         $this->assertSame('inventtable', data_get($record->details, 'table'));
     }
 
-    private function makeAzureSqlEvent(string $methodName, string $eventTypeId): array
+    public function test_execute_event_job_dispatches_next_event_job_when_output_payload_is_prepared(): void
+    {
+        Queue::fake();
+
+        $hubspotPlatform = Platform::query()->create([
+            'name' => 'Hubspot corripio',
+            'slug' => 'hubspot-corripio',
+            'type' => 'hubspot',
+            'credentials' => [
+                'access_token' => 'token_123',
+            ],
+            'active' => true,
+        ]);
+
+        [$platform, $event] = $this->makeAzureSqlEvent('syncProducts', 'azure_sql.products.sync');
+        $nextEvent = Event::query()->create([
+            'platform_id' => $hubspotPlatform->id,
+            'name' => 'Actualización de productos',
+            'event_type_id' => 'product.updated',
+            'type' => 'webhook',
+            'active' => true,
+        ]);
+
+        $event->update([
+            'to_event_id' => $nextEvent->id,
+        ]);
+
+        $connection = Mockery::mock(ConnectionInterface::class);
+        $connection->shouldReceive('select')
+            ->once()
+            ->with(self::PRODUCTS_DEFAULT_QUERY)
+            ->andReturn([
+                (object) [
+                    'itemid' => 'SKU-001',
+                    'ProductName' => 'Teclado mecanico',
+                ],
+            ]);
+
+        DB::shouldReceive('purge')->once()->with('azure_sql_runtime');
+        DB::shouldReceive('connection')->once()->with('azure_sql_runtime')->andReturn($connection);
+
+        $this->attachRelationship($event, $platform, 'itemid', 'identificador_db');
+        $this->attachRelationship($event, $platform, 'ProductName', 'name');
+
+        $hubspotApi = Mockery::mock(HubspotApiServiceRefactored::class);
+        $hubspotApi->shouldNotReceive('searchObjectByProperty');
+        $hubspotApi->shouldNotReceive('updateObject');
+        $this->app->instance(HubspotApiServiceRefactored::class, $hubspotApi);
+
+        $job = new ExecuteEventJob($event->fresh('to_event.platform'));
+        $job->handle(app(EventLoggingService::class), app(EventProcessingService::class));
+
+        Queue::assertPushed(ProcessNextEventJob::class, function (ProcessNextEventJob $job) use ($event): bool {
+            return $job->event->id === $event->id
+                && ($job->data[0]['identificador_db'] ?? null) === 'SKU-001'
+                && ($job->data[0]['name'] ?? null) === 'Teclado mecanico';
+        });
+    }
+
+    private function makeAzureSqlEvent(string $methodName, string $eventTypeId, array $meta = []): array
     {
         $platform = Platform::query()->create([
             'name' => 'Azure SQL MACO',
@@ -230,6 +429,7 @@ class AzureSqlServiceTest extends TestCase
             'method_name' => $methodName,
             'type' => 'schedule',
             'schedule_expression' => '0 * * * *',
+            'meta' => $meta,
             'active' => true,
         ]);
 

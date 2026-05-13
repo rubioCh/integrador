@@ -93,6 +93,17 @@ class Event extends Model
             return trim($this->method_name);
         }
 
+        $eventTypeId = strtolower(trim((string) ($this->event_type_id ?? '')));
+        $mappedCoreMethod = match ($eventTypeId) {
+            'product.updated' => 'updateProducts',
+            'product.created' => 'createProducts',
+            default => null,
+        };
+
+        if ($mappedCoreMethod) {
+            return $mappedCoreMethod;
+        }
+
         if (($this->platform?->type ?? null) === 'hubspot') {
             $subscriptionType = strtolower(trim((string) ($this->subscription_type ?: $this->event_type_id ?: '')));
 
